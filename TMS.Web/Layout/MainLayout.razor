@@ -1,0 +1,20 @@
+﻿@using TMS.Web.Shared
+@inherits LayoutComponentBase
+
+<PageTitle>TMS - Task Management System</PageTitle>
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4 d-flex justify-content-start login-status-bar">
+            <LoginStatus />
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>

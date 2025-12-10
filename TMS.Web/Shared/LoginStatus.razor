@@ -1,0 +1,49 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject TMS.Web.Services.AuthService AuthService
+@inject Blazored.Toast.Services.IToastService ToastService
+
+<div class="login-status-container">
+    <AuthorizeView>
+        <Authorized>
+            <div class="d-flex align-items-center gap-3">
+                <div class="login-user-info">
+                    <i class="fas fa-user-circle fa-lg me-2" style="color: white;"></i>
+                    <span class="me-3">Logged in as: <strong>@context.User.Identity?.Name</strong></span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-danger btn-sm" @onclick="Logout">
+                        <i class="fas fa-sign-out-alt me-1"></i> Logout
+                    </button>
+                </div>
+            </div>
+        </Authorized>
+
+        <NotAuthorized>
+            <div class="d-flex align-items-center gap-3">
+                <div class="login-user-info">
+                    <i class="fas fa-user-slash fa-lg me-2" style="color: #d1e7dd;"></i>
+                    <span class="me-3">You are currently not logged in.</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <a href="/login" class="btn btn-primary btn-sm">
+                        <i class="fas fa-sign-in-alt me-1"></i> Sign In
+                    </a>
+                    <a href="/register" class="btn btn-bronze btn-sm">
+                        <i class="fas fa-user-plus me-1"></i> Register
+                    </a>
+                </div>
+            </div>
+        </NotAuthorized>
+    </AuthorizeView>
+</div>
+
+@code {
+    private async Task Logout()
+    {
+        await AuthService.LogoutAsync();
+        ToastService.ShowInfo("Logged out successfully.");
+        Navigation.NavigateTo("/");
+    }
+}

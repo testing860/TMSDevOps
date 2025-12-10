@@ -1,0 +1,74 @@
+﻿@page "/login"
+@using Blazored.Toast.Services
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IToastService ToastService
+
+<div class="d-flex justify-content-center mt-5 flex-column align-items-center">
+
+    <!-- Page Header -->
+    <h2 class="mb-4 fw-bold text-center">User Login</h2>
+
+    <!-- Card -->
+    <div class="card register-card p-4 shadow-sm" style="width:600px;">
+        <EditForm Model="@model" OnValidSubmit="HandleLogin">
+            <DataAnnotationsValidator />
+
+            <!-- Validation messages at the top -->
+            <ValidationSummary class="mb-3 text-danger" />
+
+            <!-- Account Information -->
+            <div class="mb-4">
+                <h5>
+                    Account Information
+                </h5>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-envelope me-1"></i>Email Address
+                    </label>
+                    <InputText @bind-Value="model.Email" class="form-control" placeholder="Enter your email address.." />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-key me-1"></i>Password
+                    </label>
+                    <InputText type="password" @bind-Value="model.Password" class="form-control" placeholder="Enter your password.." />
+                </div>
+            </div>
+
+            <div class="text-center">
+                <button type="submit" class="btn btn-primary w-100 mb-2">
+                    <i class="fas fa-sign-in-alt me-1"></i>Login
+                </button>
+                <a href="/register" class="d-block text-center text-decoration-none">
+                    <i class="fas fa-user-plus me-1"></i>Create a New Account
+                </a>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private LoginModel model = new();
+
+    private async Task HandleLogin()
+    {
+        if (await Auth.LoginAsync(model.Email, model.Password))
+        {
+            ToastService.ShowSuccess("Logged in successfully.");
+            Nav.NavigateTo("/");
+        }
+        else
+        {
+            ToastService.ShowError("Login failed. Please check your credentials.");
+        }
+    }
+
+    private class LoginModel
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

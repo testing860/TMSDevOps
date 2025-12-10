@@ -1,0 +1,167 @@
+﻿@page "/register"
+@using Microsoft.AspNetCore.Components.Authorization
+@using TMS.Shared.DTOs
+@using TMS.Web.Services
+@using Blazored.Toast.Services
+
+@inject AuthService AuthService
+@inject NavigationManager Nav
+@inject IToastService ToastService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<div class="d-flex justify-content-center mt-5 flex-column align-items-center">
+    <h2 class="mb-4 fw-bold text-center">Create a New Account</h2>
+
+    <div class="card register-card p-4 shadow-sm" style="width:600px;">
+        <EditForm Model="@formModel" OnValidSubmit="HandleRegister" FormName="registerForm">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="mb-3 text-danger" />
+
+            <div class="mb-4">
+                <h5>Account Information</h5>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-envelope me-1"></i>Email Address
+                    </label>
+                    <InputText id="email" name="email" @bind-Value="formModel.Email" class="form-control" placeholder="Enter your email address" autocomplete="email" />
+                    <ValidationMessage For="@(() => formModel.Email)" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-signature me-1"></i>Display Name
+                    </label>
+                    <InputText id="displayName" name="displayName" @bind-Value="formModel.DisplayName" class="form-control" placeholder="Choose a display name" autocomplete="name" />
+                    <ValidationMessage For="@(() => formModel.DisplayName)" />
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5>Security</h5>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-key me-1"></i>Password
+                    </label>
+                    <InputText id="password" name="password" type="password" @bind-Value="formModel.Password" class="form-control" placeholder="Create a strong password" autocomplete="new-password" />
+                    <ValidationMessage For="@(() => formModel.Password)" />
+
+                    <div class="d-flex align-items-center mt-2">
+                        <div class="flex-grow-1 bg-light rounded me-2" style="height:6px;">
+                            <div class="rounded" style="width:@(GetPasswordStrength())%; height:100%; background-color:@GetPasswordStrengthColor(); transition: width 0.3s, background-color 0.3s;"></div>
+                        </div>
+                        <small>@GetPasswordStrengthText()</small>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        <i class="fas fa-key me-1"></i>Confirm Password
+                    </label>
+                    <InputText id="confirmPassword" name="confirmPassword" type="password" @bind-Value="formModel.ConfirmPassword" class="form-control" placeholder="Confirm your password" autocomplete="new-password" />
+                    <ValidationMessage For="@(() => formModel.ConfirmPassword)" />
+                </div>
+            </div>
+
+            <div class="text-center">
+                <button type="submit" class="btn btn-primary w-100 mb-2">
+                    <i class="fas fa-user-plus me-1"></i>Register Now
+                </button>
+                <a href="/login" class="d-block text-center text-decoration-none">
+                    <i class="fas fa-sign-in-alt me-1"></i>Already have an account? Log in
+                </a>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private RegisterDto formModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Already Authenticated -> Redirect
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated == true)
+        {
+            ToastService.ShowInfo("You are already logged in.");
+            Nav.NavigateTo("/");
+        }
+    }
+
+    private int GetPasswordStrength()
+    {
+        if (string.IsNullOrEmpty(formModel.Password)) return 0;
+
+        int score = 0;
+        if (formModel.Password.Length >= 8) score += 25;
+        if (formModel.Password.Length >= 12) score += 15;
+        if (System.Text.RegularExpressions.Regex.IsMatch(formModel.Password, "[0-9]")) score += 20;
+        if (System.Text.RegularExpressions.Regex.IsMatch(formModel.Password, "[a-z]")) score += 10;
+        if (System.Text.RegularExpressions.Regex.IsMatch(formModel.Password, "[A-Z]")) score += 15;
+        if (System.Text.RegularExpressions.Regex.IsMatch(formModel.Password, "[^a-zA-Z0-9]")) score += 15;
+
+        return Math.Min(score, 100);
+    }
+
+    private string GetPasswordStrengthColor()
+    {
+        var strength = GetPasswordStrength();
+        if (strength < 30) return "#e74c3c";
+        if (strength < 70) return "#f1c40f";
+        if (strength < 90) return "#2ecc71";
+        return "#27ae60";
+    }
+
+    private string GetPasswordStrengthText()
+    {
+        int s = GetPasswordStrength();
+        if (s < 30) return "Weak";
+        if (s < 70) return "Medium";
+        if (s < 90) return "Strong";
+        return "Very Strong";
+    }
+
+    private async Task HandleRegister()
+    {
+        // Password Match Check
+        if (formModel.Password != formModel.ConfirmPassword)
+        {
+            ToastService.ShowError("Passwords do not match. Please verify that they match exactly.");
+            return;
+        }
+
+        // API Call (AuthService)
+        RegisterResultDto result;
+        try
+        {
+            result = await AuthService.RegisterAsync(formModel);
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError("Registration failed: " + ex.Message);
+            return;
+        }
+
+        if (result == null)
+        {
+            ToastService.ShowError("Registration failed: No response.");
+            return;
+        }
+
+        if (result.Success)
+        {
+            ToastService.ShowSuccess("Registration successful! Redirecting...");
+            await Task.Delay(900);
+            Nav.NavigateTo("/");
+        }
+        else
+        {
+            foreach (var err in result.Errors ?? Array.Empty<string>())
+            {
+                ToastService.ShowError(err);
+            }
+        }
+    }
+}

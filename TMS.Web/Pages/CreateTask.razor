@@ -1,0 +1,127 @@
+﻿@page "/create-task"
+@using TMS.Shared.DTOs
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ApiClient ApiClient
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject Blazored.Toast.Services.IToastService ToastService
+
+<AuthorizeView>
+    <Authorized>
+        <div class="container mt-4">
+            <div class="row justify-content-center">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h4 class="mb-0">Create New Task</h4>
+                        </div>
+                        <div class="card-body">
+                            <EditForm Model="task" OnValidSubmit="HandleCreateTask" Context="editContext">
+                                <DataAnnotationsValidator />
+                                <ValidationSummary />
+
+                                <div class="mb-3">
+                                    <label for="title" class="form-label">Title *</label>
+                                    <InputText id="title" @bind-Value="task.Title" class="form-control" />
+                                    <ValidationMessage For="@(() => task.Title)" />
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="description" class="form-label">Description</label>
+                                    <InputTextArea id="description" @bind-Value="task.Description" class="form-control" rows="4" />
+                                    <ValidationMessage For="@(() => task.Description)" />
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="dueDate" class="form-label">Due Date</label>
+                                            <InputDate id="dueDate" @bind-Value="task.DueDate" class="form-control" />
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label for="priority" class="form-label">Priority</label>
+                                            <InputSelect id="priority" @bind-Value="task.Priority" class="form-control">
+                                                <option value="0">Low</option>
+                                                <option value="1" selected>Medium</option>
+                                                <option value="2">High</option>
+                                                <option value="3">Critical</option>
+                                            </InputSelect>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                                        @if (isSubmitting)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                        }
+                                        Create Task
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" @onclick="Cancel">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </EditForm>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="container mt-5">
+            <div class="alert alert-warning text-center">
+                <h4>Authentication Required</h4>
+                <p>Please log in to create tasks.</p>
+                <a href="/login" class="btn btn-primary">Login</a>
+            </div>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private TaskDto task = new();
+    private bool isSubmitting = false;
+
+    protected override void OnInitialized()
+    {
+        // Set default values
+        task.Status = 0; // NotStarted
+        task.Priority = 1; // Medium
+    }
+
+    private async Task HandleCreateTask()
+    {
+        isSubmitting = true;
+        StateHasChanged();
+
+        try
+        {
+            var success = await ApiClient.CreateTaskAsync(task);
+            if (success)
+            {
+                ToastService.ShowSuccess("Task created successfully!");
+                Navigation.NavigateTo("/tasks");
+            }
+            else
+            {
+                ToastService.ShowError("Failed to create task. Please try again.");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error creating task: {ex.Message}");
+        }
+
+        isSubmitting = false;
+        StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        Navigation.NavigateTo("/tasks");
+    }
+}

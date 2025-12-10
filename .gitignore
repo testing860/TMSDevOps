@@ -1,0 +1,29 @@
+## Visual Studio Files ##
+**/.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+
+## Bin and Obj Folders ##
+**/bin/
+**/obj/
+
+
+## Environment Files ##
+.env
+.env.local
+*.env
+
+
+## Build Results ##
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+
+
+## Entity Framework Migration Files ##
+**/Migrations/*.Designer.cs
+**/Migrations/*Snapshot.cs
+

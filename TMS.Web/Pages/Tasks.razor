@@ -1,0 +1,1351 @@
+﻿@page "/tasks"
+@using TMS.Shared.DTOs
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ApiClient ApiClient
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject Blazored.Toast.Services.IToastService ToastService
+
+<AuthorizeView>
+    <Authorized>
+        <div class="container mt-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>TMS – Task Management System</h2>
+                <button class="btn btn-primary" @onclick="NavigateToCreate">
+                    <i class="fas fa-plus me-2"></i>Create Task
+                </button>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs">
+                        <li class="nav-item">
+                            <button class="nav-link @(showMyTasks ? "active" : "")"
+                                    @onclick="() => ShowMyTasks(true)">
+                                My Tasks
+                            </button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link @(!showMyTasks ? "active" : "")"
+                                    @onclick="() => ShowMyTasks(false)">
+                                All Tasks
+                            </button>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="card-body">
+                    @if (isLoading)
+                    {
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    }
+                    else if (tasks?.Any() != true)
+                    {
+                        <div class="text-center py-4 text-muted">
+                            <i class="fas fa-tasks fa-3x mb-3"></i>
+                            <p>No tasks found.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover" style="table-layout: fixed;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 35%;">Task</th>
+                                        <th style="width: 10%;">Status</th>
+                                        <th style="width: 10%;">Priority</th>
+                                        <th style="width: 10%;">Due Date</th>
+                                        <th style="width: 10%;">Author</th>
+                                        <th style="width: 10%;">Assignees</th>
+                                        <th style="width: 15%;">Progress</th>
+                                        <th style="width: 10%;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var task in tasks)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    <span>@task.Title</span>
+                                                    @if (task.CanEdit && isAdmin)
+                                                    {
+                                                        <button class="btn btn-sm ms-2 icon-btn"
+                                                                @onclick='() => EditField(task.Id, "Title")'
+                                                                title="Edit title">
+                                                            <i class="fas fa-pencil-alt fa-xs text-secondary"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+
+                                                @if (editingTaskId == task.Id && editingField == "Title")
+                                                {
+                                                    <div class="mt-2">
+                                                        <input type="text" class="form-control form-control-sm"
+                                                               @bind="tempValue"
+                                                               @bind:event="oninput" />
+                                                        <div class="d-flex gap-2 mt-1">
+                                                            <button class="btn btn-sm btn-success"
+                                                                    @onclick="async () => await SaveTitle(task)">
+                                                                <i class="fas fa-check"></i> Save
+                                                            </button>
+                                                            <button class="btn btn-sm btn-secondary"
+                                                                    @onclick="CancelEdit">
+                                                                <i class="fas fa-times"></i> Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>
+                                                <div class="d-flex align-items-center" style="gap: 4px;">
+                                                    <span class="badge @GetStatusBadgeClass(task.Status)">
+                                                        @GetStatusText(task.Status)
+                                                    </span>
+                                                    @if (isAdmin)
+                                                    {
+                                                        <button class="btn btn-sm icon-btn"
+                                                                @onclick="() => EditStatus(task)"
+                                                                title="Edit status">
+                                                            <i class="fas fa-pencil-alt fa-xs text-secondary"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex align-items-center" style="gap: 4px;">
+                                                    <span class="badge @GetPriorityBadgeClass(task.Priority)">
+                                                        @GetPriorityText(task.Priority)
+                                                    </span>
+                                                    @if (task.CanEdit && isAdmin)
+                                                    {
+                                                        <button class="btn btn-sm icon-btn"
+                                                                @onclick="() => EditPriority(task)"
+                                                                title="Edit priority">
+                                                            <i class="fas fa-pencil-alt fa-xs text-secondary"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="d-flex align-items-center" style="gap: 4px;">
+                                                    @if (task.DueDate.HasValue)
+                                                    {
+                                                        @if (IsOverdue(task))
+                                                        {
+                                                            <span class="text-danger fw-bold">@task.DueDate.Value.ToShortDateString()</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>@task.DueDate.Value.ToShortDateString()</span>
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">None set</span>
+                                                    }
+                                                    @if (task.CanEdit && isAdmin)
+                                                    {
+                                                        <button class="btn btn-sm icon-btn"
+                                                                @onclick="() => EditDueDate(task)"
+                                                                title="Edit due date">
+                                                            <i class="fas fa-pencil-alt fa-xs text-secondary"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+                                            </td>
+                                            <td>@task.CreatedByDisplayName</td>
+                                            <td style="width: 12%;">
+                                                <button class="btn btn-sm btn-outline-info py-1 px-2"
+                                                        @onclick="() => ShowAssignedUsers(task)"
+                                                        title="View assignees">
+                                                    <i class="fas fa-users me-1"></i>@task.AssignedUsers.Count
+                                                </button>
+                                            </td>
+                                            <td style="width: 15%;">
+                                                <div class="d-flex align-items-center" style="gap: 4px;">
+                                                    <div class="progress-track"
+                                                         role="progressbar"
+                                                         aria-valuemin="0"
+                                                         aria-valuemax="100"
+                                                         aria-valuenow="@task.Progress"
+                                                         title="@($"{task.Progress}%")"
+                                                         @onclick="() => EditProgress(task)">
+                                                        <div class="progress-fill" style=@($"width: {task.Progress}%")></div>
+                                                    </div>
+                                                    <div class="progress-percent">@task.Progress%</div>
+                                                    @if (task.CanEdit || task.IsAssignedToCurrentUser)
+                                                    {
+                                                        <button class="btn btn-sm icon-btn"
+                                                                @onclick="() => EditProgress(task)"
+                                                                title="Edit progress">
+                                                            <i class="fas fa-pencil-alt fa-xs text-secondary"></i>
+                                                        </button>
+                                                    }
+                                                </div>
+                                            </td>
+
+                                            <td>
+                                                <div class="btn-group btn-group-sm">
+                                                    <button class="btn btn-outline-info"
+                                                            @onclick="() => ShowTaskDetails(task)"
+                                                            title="View task details and description">
+                                                        <i class="fas fa-file-alt"></i>
+                                                    </button>
+                                                    @if (isAdmin)
+                                                    {
+                                                        // Assign User Button for Team Leaders
+                                                        <button class="btn btn-outline-success"
+                                                                @onclick="() => ShowAssignUserModal(task)"
+                                                                title="Assign users to this task">
+                                                            <i class="fas fa-user-edit"></i>
+                                                        </button>
+
+                                                        // Delete Task Modal
+                                                        <button class="btn btn-outline-danger"
+                                                                @onclick="() => ShowDeleteModal(task)"
+                                                                title="Delete task">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    }
+                                                    else
+                                                    {
+                                                        @if (task.IsAssignedToCurrentUser)
+                                                        {
+                                                            <button class="btn btn-outline-warning"
+                                                                    @onclick="async () => await UnassignFromTask(task.Id)"
+                                                                    title="Unassign yourself">
+                                                                <i class="fas fa-user-minus"></i>
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="btn btn-outline-success"
+                                                                    @onclick="async () => await AssignToTask(task.Id)"
+                                                                    title="Assign yourself">
+                                                                <i class="fas fa-user-plus"></i>
+                                                            </button>
+                                                        }
+                                                    }
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="container mt-5">
+            <div class="alert alert-warning text-center">
+                <h4>Authentication Required</h4>
+                <p>Please log in to view and manage tasks.</p>
+                <a href="/login" class="btn btn-primary">Login</a>
+            </div>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+
+@* Show Status Modal *@
+@if (showStatusModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Status</h5>
+                    <button type="button" class="btn-close" @onclick="CloseStatusModal"></button>
+                </div>
+                <div class="modal-body">
+                    <select class="form-select" @bind="tempStatus">
+                        <option value="0">Not Started</option>
+                        <option value="1">In Progress</option>
+                        <option value="2">Under Review</option>
+                        <option value="3">Completed</option>
+                        <option value="4">Archived</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseStatusModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="async () => await SaveStatus()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Model for the Priority*@
+@if (showPriorityModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Priority</h5>
+                    <button type="button" class="btn-close" @onclick="ClosePriorityModal"></button>
+                </div>
+                <div class="modal-body">
+                    <select class="form-select" @bind="tempPriority">
+                        <option value="0">Low</option>
+                        <option value="1">Medium</option>
+                        <option value="2">High</option>
+                        <option value="3">Critical</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="ClosePriorityModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="async () => await SavePriorityModal()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Modal for the Due Date*@
+@if (showDueDateModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Due Date</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDueDateModal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="date" class="form-control"
+                           value="@(tempDueDate?.ToString("yyyy-MM-dd") ?? "")"
+                           @onchange="(e) => OnTempDueDateChange(e)" />
+                    <button class="btn btn-sm btn-link mt-1" @onclick="ClearDueDate">
+                        Clear due date
+                    </button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDueDateModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="async () => await SaveDueDate()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+
+@* Modal For the Progress*@
+@if (showProgressModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Progress</h5>
+                    <button type="button" class="btn-close" @onclick="CloseProgressModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="progress-modal-container">
+                        <div class="d-flex align-items-center justify-content-center mb-4">
+                            <div class="progress-preview-large">
+                                <div class="progress-bar-preview-large" style=@($"width: {tempProgress}%")></div>
+                            </div>
+                            <span class="progress-value-large ms-3">@tempProgress%</span>
+                        </div>
+
+                        <div class="slider-wrapper mb-3">
+                            <input type="range"
+                                   class="form-range progress-slider-large"
+                                   min="0"
+                                   max="100"
+                                   step="1"
+                                   @bind="tempProgress"
+                                   @bind:event="oninput" />
+                        </div>
+
+                        <div class="d-flex justify-content-between mb-4">
+                            <small class="text-muted">0%</small>
+                            <small class="text-muted">100%</small>
+                        </div>
+
+                        <div class="d-flex justify-content-center gap-2 mb-4">
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => tempProgress = 0">
+                                0%
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => tempProgress = 25">
+                                25%
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => tempProgress = 50">
+                                50%
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => tempProgress = 75">
+                                75%
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    @onclick="() => tempProgress = 100">
+                                100%
+                            </button>
+                        </div>
+
+                        <div class="input-group mb-3">
+                            <span class="input-group-text">Set exact value:</span>
+                            <input type="number" class="form-control"
+                                   min="0" max="100"
+                                   @bind="tempProgress"
+                                   @bind:event="oninput" />
+                            <span class="input-group-text">%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseProgressModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="async () => await SaveProgressModal()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Modal to Show Assigned Users*@
+@if (showAssignedUsersModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Assignees for: @selectedTaskTitle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAssignedUsersModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (selectedTaskAssignedUsers?.Any() == true)
+                    {
+                        <ul class="list-group">
+                            @foreach (var user in selectedTaskAssignedUsers)
+                            {
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@user.DisplayName</strong>
+                                        <div class="text-muted small">@user.Email</div>
+                                    </div>
+                                    <div>
+                                        @if (isAdmin)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="async () => await UnassignUser(selectedTaskId, user.Id)">
+                                                <i class="fas fa-times"></i> Unassign
+                                            </button>
+                                        }
+                                        else if (user.Id == currentUserId)
+                                        {
+                                            <button class="btn btn-sm btn-outline-warning"
+                                                    @onclick="async () => await UnassignFromTask(selectedTaskId)">
+                                                <i class="fas fa-user-minus"></i> Unassign Self
+                                            </button>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="text-muted text-center">No assignees for this task.</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAssignedUsersModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* Modal for the Assigning of Users*@
+@if (showAssignUserModal)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Assign Users to: @assignToTaskTitle</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAssignUserModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (allUsers.Any())
+                    {
+                        <ul class="list-group">
+                            @foreach (var user in allUsers)
+                            {
+                                var isAssigned = tasks.FirstOrDefault(t => t.Id == assignToTaskId)?
+                                .AssignedUsers.Any(au => au.Id == user.Id) ?? false;
+
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@user.DisplayName</strong>
+                                        @if (user.Id == currentUserId)
+                                        {
+                                            <span class="badge bg-info ms-2">You</span>
+                                        }
+                                        <div class="text-muted small">@user.Email</div>
+                                    </div>
+                                    <div>
+                                        @if (isAssigned)
+                                        {
+                                            @if (user.Id == currentUserId)
+                                            {
+                                                <button class="btn btn-sm btn-outline-warning"
+                                                        @onclick="async () => await UnassignUser(assignToTaskId, user.Id)">
+                                                    <i class="fas fa-times"></i> Unassign Self
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-sm btn-outline-danger"
+                                                        @onclick="async () => await UnassignUser(assignToTaskId, user.Id)">
+                                                    <i class="fas fa-times"></i> Unassign
+                                                </button>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            @if (user.Id == currentUserId)
+                                            {
+                                                <button class="btn btn-sm btn-outline-primary"
+                                                        @onclick="async () => await AssignUser(assignToTaskId, user.Id)">
+                                                    <i class="fas fa-user-plus me-1"></i>Assign Self
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-sm btn-outline-success"
+                                                        @onclick="async () => await AssignUser(assignToTaskId, user.Id)">
+                                                    <i class="fas fa-user-plus"></i> Assign
+                                                </button>
+                                            }
+                                        }
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="text-muted text-center">No users available.</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAssignUserModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@*Task Description / Notes Modal*@
+@if (showTaskDetailsModal && taskDetails != null)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Task Details</h5>
+                    <button type="button" class="btn-close" @onclick="CloseTaskDetailsModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Title</label>
+                                @if (isEditingTaskDetails && (taskDetails.CanEdit))
+                                {
+                                    <input type="text" class="form-control"
+                                           @bind="tempTaskDetailsTitle"
+                                           @bind:event="oninput" />
+                                }
+                                else
+                                {
+                                    <div class="p-2 bg-light rounded">
+                                        <strong>@taskDetails.Title</strong>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Status</label>
+                                <div>
+                                    <span class="badge @GetStatusBadgeClass(taskDetails.Status)">
+                                        @GetStatusText(taskDetails.Status)
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Priority</label>
+                                <div>
+                                    <span class="badge @GetPriorityBadgeClass(taskDetails.Priority)">
+                                        @GetPriorityText(taskDetails.Priority)
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Due Date</label>
+                                <div class="p-2 bg-light rounded">
+                                    @if (taskDetails.DueDate.HasValue)
+                                    {
+                                        @taskDetails.DueDate.Value.ToString("dddd, MMMM dd, yyyy")
+                                        @if (IsOverdue(taskDetails))
+                                        {
+                                            <span class="badge bg-danger ms-2">Overdue</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">No due date</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Author</label>
+                                <div class="p-2 bg-light rounded">
+                                    @taskDetails.CreatedByDisplayName
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted small">Created On</label>
+                                <div class="p-2 bg-light rounded">
+                                    @taskDetails.CreatedAt.ToString("dddd, MMMM dd, yyyy")
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label text-muted small">Description</label>
+                            @if ((taskDetails.CanEdit || taskDetails.IsAssignedToCurrentUser) && !isEditingTaskDetails)
+                            {
+                                <button class="btn btn-sm btn-outline-primary"
+                                        @onclick="EnableTaskDetailsEdit">
+                                    <i class="fas fa-edit me-1"></i>Edit
+                                </button>
+                            }
+                        </div>
+
+                        @if (isEditingTaskDetails && (taskDetails.CanEdit || taskDetails.IsAssignedToCurrentUser))
+                        {
+                            <textarea class="form-control"
+                                      rows="8"
+                                      style="white-space: pre-wrap; word-wrap: break-word;"
+                                      @bind="tempTaskDetailsDescription"
+                                      @bind:event="oninput"></textarea>
+                        }
+                        else
+                        {
+                            <div class="p-3 bg-light rounded"
+                                 style="white-space: pre-wrap; word-wrap: break-word; min-height: 150px; max-height: 300px; overflow-y: auto;">
+                                @if (string.IsNullOrWhiteSpace(taskDetails.Description))
+                                {
+                                    <span class="text-muted">No description provided.</span>
+                                }
+                                else
+                                {
+                                    @taskDetails.Description
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    @if (isEditingTaskDetails && (taskDetails.CanEdit || taskDetails.IsAssignedToCurrentUser))
+                    {
+                        <button type="button" class="btn btn-success"
+                                @onclick="async () => await SaveTaskDetails()">
+                            <i class="fas fa-save me-1"></i>Save Changes
+                        </button>
+                        <button type="button" class="btn btn-secondary"
+                                @onclick="CancelTaskDetailsEdit">
+                            <i class="fas fa-times me-1"></i>Cancel
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-secondary"
+                                @onclick="CloseTaskDetailsModal">
+                            Close
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* DELETE CONFIRMATION MODAL *@
+@if (showDeleteModal && taskToDelete != null)
+{
+    <div class="modal-backdrop fade show" style="display: block;"></div>
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>Confirm Deletion
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <h6 class="alert-heading">Warning: This action cannot be undone!</h6>
+                        <p class="mb-0">Are you sure you want to delete this task entirely?</p>
+                    </div>
+                    <div class="p-3 bg-light rounded">
+                        <strong>Task to delete:</strong>
+                        <div class="mt-2">
+                            <span class="fw-bold">@taskToDelete.Title</span>
+                            <div class="small text-muted mt-1">
+                                <div>Status: <span class="badge @GetStatusBadgeClass(taskToDelete.Status)">@GetStatusText(taskToDelete.Status)</span></div>
+                                <div>Priority: <span class="badge @GetPriorityBadgeClass(taskToDelete.Priority)">@GetPriorityText(taskToDelete.Priority)</span></div>
+                                <div>Created by: @taskToDelete.CreatedByDisplayName</div>
+                                <div>Assigned users: @taskToDelete.AssignedUsers.Count</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <p class="text-muted small">
+                            <i class="fas fa-info-circle me-1"></i>
+                            This will permanently remove the task and all associated data from the system.
+                        </p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDeleteModal">
+                        <i class="fas fa-times me-1"></i>Cancel
+                    </button>
+                    <button type="button" class="btn btn-danger" @onclick="async () => await ConfirmDelete()">
+                        <i class="fas fa-trash me-1"></i>Confirm Deletion
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TaskDto> tasks = new();
+    private List<UserDto> allUsers = new();
+    private bool isLoading = true;
+    private bool showMyTasks = true;
+    private bool isAdmin = false;
+    private string? currentUserId = null;
+    private bool showAssignUserModal = false;
+    private int assignToTaskId = -1;
+    private string assignToTaskTitle = "";
+
+    // Editing state
+    private int editingTaskId = -1;
+    private string editingField = "";
+    private string tempValue = "";
+    private int tempPriority = 1;
+    private int tempStatus = 0;
+    private int tempProgress = 0;
+    private DateTime? tempDueDate = null;
+    private TaskDto? taskForEdit = null;
+
+    // Modals
+    private bool showStatusModal = false;
+    private bool showPriorityModal = false;
+    private bool showDueDateModal = false;
+    private bool showProgressModal = false;
+    private bool showAssignedUsersModal = false;
+    private int selectedTaskId = -1;
+    private string selectedTaskTitle = "";
+    private List<UserDto> selectedTaskAssignedUsers = new();
+
+    // Task Details Modal
+    private bool showTaskDetailsModal = false;
+    private TaskDto? taskDetails = null;
+    private bool isEditingTaskDetails = false;
+    private string tempTaskDetailsTitle = "";
+    private string tempTaskDetailsDescription = "";
+
+    // Delete Modal
+    private bool showDeleteModal = false;
+    private TaskDto? taskToDelete = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CheckAdminStatus();
+        await LoadAllUsers();
+        await LoadTasks();
+    }
+
+    private async Task LoadTasks()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            if (showMyTasks)
+            {
+                tasks = await ApiClient.GetMyTasksAsync();
+            }
+            else
+            {
+                tasks = await ApiClient.GetAllTasksAsync();
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            tasks = new List<TaskDto>();
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading tasks: {ex.Message}");
+            tasks = new List<TaskDto>();
+        }
+
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task CheckAdminStatus()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        isAdmin = user.IsInRole("Admin");
+        currentUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+
+    private async Task LoadAllUsers()
+    {
+        try
+        {
+            allUsers = await ApiClient.GetAllUsersAsync();
+            Console.WriteLine($"Loaded {allUsers.Count} users");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
+            ToastService.ShowError("Failed to load users list");
+        }
+    }
+
+    private async void ShowMyTasks(bool myTasks)
+    {
+        showMyTasks = myTasks;
+        await LoadTasks();
+    }
+
+    private async Task AssignToTask(int taskId)
+    {
+        try
+        {
+            var success = await ApiClient.AssignToTaskAsync(taskId);
+            if (success)
+            {
+                ToastService.ShowSuccess("Successfully assigned to task");
+                await LoadTasks();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to assign to task");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    private async Task UnassignFromTask(int taskId)
+    {
+        try
+        {
+            var success = await ApiClient.UnassignFromTaskAsync(taskId);
+            if (success)
+            {
+                ToastService.ShowSuccess("Successfully unassigned from task");
+                await LoadTasks();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to unassign from task");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    private async Task AssignUser(int taskId, string userId)
+    {
+        try
+        {
+            var success = await ApiClient.AssignUserToTaskAsync(taskId, userId);
+            if (success)
+            {
+                ToastService.ShowSuccess("User assigned successfully");
+                await LoadTasks();
+
+                if (showAssignUserModal && assignToTaskId == taskId)
+                {
+                    // Modal will refresh Automatically once LoadTasks() completes
+                }
+            }
+            else
+            {
+                ToastService.ShowError("Failed to assign user");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    private async Task UnassignUser(int taskId, string userId)
+    {
+        try
+        {
+            var success = await ApiClient.UnassignUserFromTaskAsync(taskId, userId);
+            if (success)
+            {
+                ToastService.ShowSuccess("User unassigned successfully");
+                await LoadTasks();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to unassign user");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    // EDITING METHODS
+    private void EditField(int taskId, string field)
+    {
+        var task = tasks.FirstOrDefault(t => t.Id == taskId);
+        if (task == null) return;
+
+        // For description/title editing, check if user can edit or is assigned
+        if ((field == "Title" || field == "Description") && !task.CanEdit && !task.IsAssignedToCurrentUser)
+        {
+            ToastService.ShowError("You don't have permission to edit this field");
+            return;
+        }
+
+        editingTaskId = taskId;
+        editingField = field;
+        taskForEdit = task;
+
+        if (field == "Title")
+        {
+            tempValue = taskForEdit.Title;
+        }
+    }
+
+    private void EditStatus(TaskDto task)
+    {
+        if (!isAdmin)
+        {
+            ToastService.ShowError("Only administrators can change task status.");
+            return;
+        }
+
+        taskForEdit = task;
+        tempStatus = task.Status;
+        showStatusModal = true;
+    }
+
+    private void EditPriority(TaskDto task)
+    {
+        taskForEdit = task;
+        tempPriority = task.Priority;
+        showPriorityModal = true;
+    }
+
+    private void EditDueDate(TaskDto task)
+    {
+        taskForEdit = task;
+        tempDueDate = task.DueDate;
+        showDueDateModal = true;
+    }
+
+    private void EditProgress(TaskDto task)
+    {
+        if (!task.IsAssignedToCurrentUser && !task.CanEdit)
+        {
+            ToastService.ShowError("Unable to change the progress for tasks you're not working on.");
+            return;
+        }
+
+        taskForEdit = task;
+        tempProgress = task.Progress;
+        showProgressModal = true;
+    }
+
+    private void ShowAssignedUsers(TaskDto task)
+    {
+        selectedTaskId = task.Id;
+        selectedTaskTitle = task.Title;
+        selectedTaskAssignedUsers = task.AssignedUsers.ToList();
+        showAssignedUsersModal = true;
+        StateHasChanged();
+    }
+
+    private void ShowTaskDetails(TaskDto task)
+    {
+        taskDetails = task;
+        tempTaskDetailsTitle = task.Title;
+        tempTaskDetailsDescription = task.Description;
+        isEditingTaskDetails = false;
+        showTaskDetailsModal = true;
+        StateHasChanged();
+    }
+
+    // DELETE MODAL METHODS
+    private void ShowDeleteModal(TaskDto task)
+    {
+        taskToDelete = task;
+        showDeleteModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseDeleteModal()
+    {
+        showDeleteModal = false;
+        taskToDelete = null;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (taskToDelete == null) return;
+
+        try
+        {
+            var success = await ApiClient.DeleteTaskAsync(taskToDelete.Id);
+            if (success)
+            {
+                ToastService.ShowSuccess("Task deleted successfully!");
+                await LoadTasks();
+                CloseDeleteModal();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to delete task");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error deleting task: {ex.Message}");
+        }
+    }
+
+    private void EnableTaskDetailsEdit()
+    {
+        if (taskDetails != null && (taskDetails.CanEdit || taskDetails.IsAssignedToCurrentUser))
+        {
+            isEditingTaskDetails = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveTaskDetails()
+    {
+        if (taskDetails != null && (taskDetails.CanEdit || taskDetails.IsAssignedToCurrentUser))
+        {
+            taskDetails.Title = tempTaskDetailsTitle;
+            taskDetails.Description = tempTaskDetailsDescription;
+
+            try
+            {
+                var success = await ApiClient.UpdateTaskAsync(taskDetails);
+                if (success)
+                {
+                    ToastService.ShowSuccess("Task details updated successfully");
+                    await LoadTasks();
+                    isEditingTaskDetails = false;
+
+                    var updatedTask = tasks.FirstOrDefault(t => t.Id == taskDetails.Id);
+                    if (updatedTask != null)
+                    {
+                        taskDetails = updatedTask;
+                    }
+                }
+                else
+                {
+                    ToastService.ShowError("Failed to update task details");
+                }
+            }
+            catch (Exception ex)
+            {
+                ToastService.ShowError($"Error: {ex.Message}");
+            }
+        }
+    }
+
+    private void CancelTaskDetailsEdit()
+    {
+        if (taskDetails != null)
+        {
+            tempTaskDetailsTitle = taskDetails.Title;
+            tempTaskDetailsDescription = taskDetails.Description;
+            isEditingTaskDetails = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CloseTaskDetailsModal()
+    {
+        showTaskDetailsModal = false;
+        taskDetails = null;
+        isEditingTaskDetails = false;
+        StateHasChanged();
+    }
+
+    private void CloseStatusModal()
+    {
+        showStatusModal = false;
+        taskForEdit = null;
+    }
+
+    private void ClosePriorityModal()
+    {
+        showPriorityModal = false;
+        taskForEdit = null;
+    }
+
+    private void CloseDueDateModal()
+    {
+        showDueDateModal = false;
+        taskForEdit = null;
+    }
+
+    private void CloseProgressModal()
+    {
+        showProgressModal = false;
+        taskForEdit = null;
+    }
+
+    private void OnTempDueDateChange(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (!string.IsNullOrEmpty(value))
+        {
+            tempDueDate = DateTime.Parse(value);
+        }
+        else
+        {
+            tempDueDate = null;
+        }
+    }
+
+    private void ClearDueDate()
+    {
+        tempDueDate = null;
+    }
+
+    private void CloseAssignedUsersModal()
+    {
+        showAssignedUsersModal = false;
+        selectedTaskId = -1;
+        selectedTaskTitle = "";
+        selectedTaskAssignedUsers = new List<UserDto>();
+        StateHasChanged();
+    }
+
+    private void CancelEdit()
+    {
+        editingTaskId = -1;
+        editingField = "";
+    }
+
+    private async Task SaveTitle(TaskDto task)
+    {
+        if (task.CanEdit || task.IsAssignedToCurrentUser)
+        {
+            task.Title = tempValue;
+            await SaveTask(task);
+            CancelEdit();
+        }
+        else
+        {
+            ToastService.ShowError("You don't have permission to edit the title");
+        }
+    }
+
+    private async Task SavePriorityModal()
+    {
+        if (taskForEdit != null && taskForEdit.CanEdit)
+        {
+            taskForEdit.Priority = tempPriority;
+            await SaveTask(taskForEdit);
+        }
+        ClosePriorityModal();
+    }
+
+    private async Task SaveProgressModal()
+    {
+        if (taskForEdit != null && (taskForEdit.IsAssignedToCurrentUser || taskForEdit.CanEdit))
+        {
+            taskForEdit.Progress = tempProgress;
+            await SaveTask(taskForEdit);
+        }
+        CloseProgressModal();
+    }
+
+    private async Task SaveStatus()
+    {
+        if (taskForEdit != null)
+        {
+            taskForEdit.Status = tempStatus;
+            await SaveTask(taskForEdit);
+        }
+        CloseStatusModal();
+    }
+
+    private async Task SaveDueDate()
+    {
+        if (taskForEdit != null)
+        {
+            taskForEdit.DueDate = tempDueDate;
+            await SaveTask(taskForEdit);
+        }
+        CloseDueDateModal();
+    }
+
+    private async Task SaveTask(TaskDto task)
+    {
+        try
+        {
+            var success = await ApiClient.UpdateTaskAsync(task);
+            if (success)
+            {
+                ToastService.ShowSuccess("Task updated successfully");
+                await LoadTasks();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to update task - you may not have permission");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error: {ex.Message}");
+        }
+    }
+
+    private void NavigateToCreate()
+    {
+        Navigation.NavigateTo("/create-task");
+    }
+
+    private void ShowAssignUserModal(TaskDto task)
+    {
+        assignToTaskId = task.Id;
+        assignToTaskTitle = task.Title;
+        showAssignUserModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseAssignUserModal()
+    {
+        showAssignUserModal = false;
+        assignToTaskId = -1;
+        assignToTaskTitle = "";
+        StateHasChanged();
+    }
+
+    private string GetStatusBadgeClass(int status)
+    {
+        return status switch
+        {
+            0 => "bg-secondary", // NotStarted
+            1 => "bg-primary",   // InProgress
+            2 => "bg-warning",   // UnderReview
+            3 => "bg-success",   // Completed
+            4 => "bg-dark",      // Archived
+            _ => "bg-secondary"
+        };
+    }
+
+    private string GetStatusText(int status)
+    {
+        return status switch
+        {
+            0 => "Not Started",
+            1 => "In Progress",
+            2 => "Under Review",
+            3 => "Completed",
+            4 => "Archived",
+            _ => "Unknown"
+        };
+    }
+
+    private string GetPriorityBadgeClass(int priority)
+    {
+        return priority switch
+        {
+            0 => "bg-success",   // Low
+            1 => "bg-info",      // Medium
+            2 => "bg-warning",   // High
+            3 => "bg-danger",    // Critical
+            _ => "bg-info"
+        };
+    }
+
+    private string GetPriorityText(int priority)
+    {
+        return priority switch
+        {
+            0 => "Low",
+            1 => "Medium",
+            2 => "High",
+            3 => "Critical",
+            _ => "Medium"
+        };
+    }
+
+    private bool IsOverdue(TaskDto task)
+    {
+        return task.DueDate.HasValue &&
+               task.DueDate.Value.Date < DateTime.Today &&
+               task.Status != 3; // Not Completed
+    }
+}
