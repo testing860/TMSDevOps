@@ -67,25 +67,38 @@ a, .btn-link {
         content: "An error has occurred."
     }
 
+
+
+
+/* CUSTOM BLAZOR LOADING CIRCLE*/
+
+.loading-logo {
+    display: block;
+    margin: 5vh auto 0rem auto;
+    max-width: 250px;
+    height: auto;
+}
+
 .loading-progress {
     position: relative;
     display: block;
-    width: 8rem;
-    height: 8rem;
-    margin: 20vh auto 1rem auto;
+    width: 16rem;
+    height: 16rem;
+    margin: 20vh auto 0rem auto;
+    transform: translateY(-8rem)
 }
 
     .loading-progress circle {
         fill: none;
         stroke: #e0e0e0;
-        stroke-width: 0.6rem;
+        stroke-width: 1.2rem;
         transform-origin: 50% 50%;
         transform: rotate(-90deg);
     }
 
         .loading-progress circle:last-child {
-            stroke: #1b6ec2;
-            stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+            stroke: #28a745;
+            stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 1.6), 500%;
             transition: stroke-dasharray 0.05s ease-in-out;
         }
 
@@ -93,7 +106,8 @@ a, .btn-link {
     position: absolute;
     text-align: center;
     font-weight: bold;
-    inset: calc(20vh + 3.25rem) 0 auto 0.2rem;
+    inset: calc(20vh + 0.5rem) 0 auto 0.2rem;
+    font-size: 1.4rem;
 }
 
     .loading-progress-text:after {
