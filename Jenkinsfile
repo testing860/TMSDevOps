@@ -80,7 +80,7 @@ EOF
                     sudo systemctl stop tms-app.service 2>/dev/null || true
                     sudo rm -rf ${JENKINS_DEPLOY_DIR}/*
                     sudo cp -r ./publish/* ${JENKINS_DEPLOY_DIR}/
-                    sudo cp .env ${JENKINS_DEPLOY_DIR}/
+		    sudo cp .env ${JENKINS_DEPLOY_DIR}/TMS.API/
                     
                     # Fix permissions - adjust user as needed
                     sudo chown -R ec:ec ${JENKINS_DEPLOY_DIR} || sudo chown -R jenkins:jenkins ${JENKINS_DEPLOY_DIR}
