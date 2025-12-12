@@ -103,13 +103,13 @@ server {
     listen 7130;
     server_name _;
     root /opt/tms-app/web;
-    
+
     location / {
         try_files $uri $uri/ /index.html;
     }
-    
+
     location /api {
-        proxy_pass http://localhost:5000;
+        proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
     }
