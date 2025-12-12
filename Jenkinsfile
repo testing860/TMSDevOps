@@ -7,6 +7,8 @@ pipeline {
         JWT_KEY = credentials('tms-jwt-key')
         ADMIN_PASSWORD = credentials('tms-admin-password')
         APP_URLS = credentials('tms-app-urls')
+        WEB_PORT = '7130'
+        API_PORT = '5000'
     }
     
     stages {
@@ -30,7 +32,9 @@ pipeline {
         stage('Create Secure Environment File') {
             steps {
                 sh '''
-                    cat > .env << EOF
+                    sudo mkdir -p /opt/tms-app/api
+                    
+                    sudo tee /opt/tms-app/api/.env << EOF
 DB_SERVER=localhost
 DB_NAME=TaskManagementSystem
 DB_USER=sa
@@ -47,7 +51,10 @@ ADMIN_DISPLAYNAME=Admin
 ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=''' + APP_URLS + '''
 EOF
-                    echo "✅ .env file created"
+                    
+                    sudo chown ec:ec /opt/tms-app/api/.env
+                    sudo chmod 600 /opt/tms-app/api/.env
+                    echo "✅ Secure .env file created"
                 '''
             }
         }
@@ -70,7 +77,7 @@ EOF
                     
                     sudo rm -rf /opt/tms-app/api/*
                     sudo cp -r ./publish-api/* /opt/tms-app/api/
-                    sudo cp .env /opt/tms-app/api/
+                    # .env already created in secure location
                     
                     sudo rm -rf /opt/tms-app/web/*
                     sudo cp -r ./publish-web/wwwroot/* /opt/tms-app/web/
@@ -78,7 +85,7 @@ EOF
                     sudo chown -R ec:ec /opt/tms-app
                     
                     # Create API service
-                    sudo tee /etc/systemd/system/tms-api.service << "API_SERVICE"
+                    sudo tee /etc/systemd/system/tms-api.service << API_SERVICE
 [Unit]
 Description=TMS API Backend
 After=network.target
@@ -97,21 +104,21 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 WantedBy=multi-user.target
 API_SERVICE
                     
-                    # Create nginx config for port 7130
-                    sudo tee /etc/nginx/sites-available/tms << "NGINX_CONFIG"
+                    # Create nginx config
+                    sudo tee /etc/nginx/sites-available/tms << NGINX_CONFIG
 server {
-    listen 7130;
+    listen ''' + WEB_PORT + ''';
     server_name _;
     root /opt/tms-app/web;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     location /api {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:''' + API_PORT + ''';
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
     }
 }
 NGINX_CONFIG
@@ -125,15 +132,18 @@ NGINX_CONFIG
                     sudo systemctl enable tms-api.service
                     sudo systemctl start tms-api.service
                     
-                    echo "🚀 Deployment complete!"
-                    echo "Web: http://$(hostname -I | awk '{print $1}'):7130"
-                    echo "API: http://$(hostname -I | awk '{print $1}'):5000"
+                    echo "🚀 Deployment completed!"
+                    echo "Web: http://\$(hostname -I | awk '{print \$1}'):''' + WEB_PORT + '''"
+                    echo "API: http://\$(hostname -I | awk '{print \$1}'):''' + API_PORT + '''"
                 '''
             }
         }
     }
     
     post {
+        always {
+            cleanWs()
+        }
         failure {
             echo '❌ Pipeline failed'
         }
