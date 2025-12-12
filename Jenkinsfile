@@ -76,7 +76,7 @@ stage('Publish & Deploy') {
                 -c Release -o ./publish-api \\
                 --runtime linux-x64
             
-            echo "Publishing Web..."
+            echo "Publishing Web (Blazor WASM)..."
             dotnet publish TMS.Web/TMS.Web.csproj \\
                 -c Release -o ./publish-web \\
                 --runtime linux-x64
@@ -87,7 +87,7 @@ stage('Publish & Deploy') {
             sudo mkdir -p /opt/tms-app/api
             sudo mkdir -p /opt/tms-app/web
             
-            # Stop services
+            # Stop services if they exist
             sudo systemctl stop tms-api.service 2>/dev/null || true
             sudo systemctl stop tms-web.service 2>/dev/null || true
             
@@ -96,20 +96,78 @@ stage('Publish & Deploy') {
             sudo cp -r ./publish-api/* /opt/tms-app/api/
             sudo cp .env /opt/tms-app/api/
             
-            # Deploy Web
+            # Deploy Web (Blazor WASM static files)
             sudo rm -rf /opt/tms-app/web/*
-            sudo cp -r ./publish-web/* /opt/tms-app/web/
+            sudo cp -r ./publish-web/wwwroot/* /opt/tms-app/web/
             
             # Fix permissions
             sudo chown -R ec:ec /opt/tms-app
             
-            # Start services
-            sudo systemctl start tms-api.service
-            sudo systemctl start tms-web.service
+            # Create systemd service for API (since web is static)
+            sudo tee /etc/systemd/system/tms-api.service << 'API_SERVICE'
+[Unit]
+Description=TMS API Backend
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/tms-app/api
+ExecStart=/usr/bin/dotnet TMS.API.dll
+EnvironmentFile=/opt/tms-app/api/.env
+Restart=always
+RestartSec=10
+User=ec
+Group=ec
+SyslogIdentifier=tms-api
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
+API_SERVICE
             
-            echo "🚀 Both API and Web deployed!"
+            # Reload and start API service
+            sudo systemctl daemon-reload
+            sudo systemctl enable tms-api.service
+            sudo systemctl start tms-api.service
+            
+            # Configure nginx to serve Blazor static files
+            echo "Configuring nginx for Blazor WebAssembly..."
+            sudo tee /etc/nginx/sites-available/tms-web << 'NGINX_CONFIG'
+server {
+    listen 80;
+    server_name _;
+    
+    location / {
+        root /opt/tms-app/web;
+        try_files \$uri \$uri/ /index.html;
+        index index.html;
+    }
+    
+    # Proxy API requests to the .NET API
+    location /api {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection keep-alive;
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGINX_CONFIG
+            
+            # Enable nginx site
+            sudo ln -sf /etc/nginx/sites-available/tms-web /etc/nginx/sites-enabled/
+            sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+            
+            # Test nginx config and restart
+            sudo nginx -t
+            sudo systemctl restart nginx
+            
+            echo "🚀 Deployment complete!"
             echo "API running at: ${APP_URLS}"
-            echo "Web frontend available"
+            echo "Web (Blazor) served by nginx on port 80"
+            echo "API proxied from /api to http://localhost:5000"
         """
     }
 }
