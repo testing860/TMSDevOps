@@ -68,30 +68,42 @@ EOF
             }
         }
         
-        stage('Publish & Deploy') {
-            steps {
-                sh """
-                    echo "Publishing application..."
-                    dotnet publish TMS.API/TMS.API.csproj \\
-                        -c Release -o ./publish \\
-                        --runtime linux-x64
-                    
-                    echo "Deploying to: ${JENKINS_DEPLOY_DIR}"
-                    sudo systemctl stop tms-app.service 2>/dev/null || true
-                    sudo rm -rf ${JENKINS_DEPLOY_DIR}/*
-                    sudo cp -r ./publish/* ${JENKINS_DEPLOY_DIR}/
-		    sudo cp .env ${JENKINS_DEPLOY_DIR}/TMS.API/
-                    
-                    # Fix permissions - adjust user as needed
-                    sudo chown -R ec:ec ${JENKINS_DEPLOY_DIR} || sudo chown -R jenkins:jenkins ${JENKINS_DEPLOY_DIR}
-                    
-                    sudo systemctl start tms-app.service
-                    
-                    echo "🚀 Deployment complete!"
-                    echo "Application running at: ${APP_URLS}"
-                """
-            }
-        }
+stage('Publish & Deploy') {
+    steps {
+        sh """
+            echo "Publishing application..."
+            dotnet publish TMS.API/TMS.API.csproj \\
+                -c Release -o ./publish \\
+                --runtime linux-x64
+            
+            echo "Deploying to: ${JENKINS_DEPLOY_DIR}"
+            
+            # Stop the service
+            sudo systemctl stop tms-app.service 2>/dev/null || true
+            
+            # Clear deployment directory
+            sudo rm -rf ${JENKINS_DEPLOY_DIR}/*
+            
+            # Create TMS.API directory in deployment location
+            sudo mkdir -p ${JENKINS_DEPLOY_DIR}/TMS.API
+            
+            # Move all published files into TMS.API directory
+            sudo cp -r ./publish/* ${JENKINS_DEPLOY_DIR}/TMS.API/
+            
+            # Copy .env file to TMS.API directory
+            sudo cp .env ${JENKINS_DEPLOY_DIR}/TMS.API/
+            
+            # Fix permissions
+            sudo chown -R ec:ec ${JENKINS_DEPLOY_DIR} || sudo chown -R jenkins:jenkins ${JENKINS_DEPLOY_DIR}
+            
+            # Start the service
+            sudo systemctl start tms-app.service
+            
+            echo "🚀 Deployment complete!"
+            echo "Application running at: ${APP_URLS}"
+        """
+    }
+}
     }
     
     post {
