@@ -104,10 +104,10 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 WantedBy=multi-user.target
 API_SERVICE
                     
-                    # Create nginx config
-                    sudo tee /etc/nginx/sites-available/tms << NGINX_CONFIG
+# Create nginx config for port 7130
+sudo tee /etc/nginx/sites-available/tms << "NGINX_CONFIG"
 server {
-    listen ''' + WEB_PORT + ''';
+    listen 7130;
     server_name _;
     root /opt/tms-app/web;
 
@@ -116,7 +116,7 @@ server {
     }
 
     location /api {
-        proxy_pass http://127.0.0.1:''' + API_PORT + ''';
+        proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
     }
