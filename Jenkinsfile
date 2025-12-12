@@ -2,8 +2,7 @@ pipeline {
     agent any
     
     environment {
-        // Keep these credentials
-        JENKINS_DEPLOY_DIR = credentials('jenkins-deploy-dir')
+        // REMOVE THIS LINE: JENKINS_DEPLOY_DIR = credentials('jenkins-deploy-dir')
         GITHUB_SSH_CREDENTIAL_ID = 'f2279fbb-b675-4191-bb6e-5e5c0d1421a5'
         DB_PASSWORD = credentials('tms-db-password')
         JWT_KEY = credentials('tms-jwt-key')
@@ -68,43 +67,44 @@ EOF
             }
         }
         
-stage('Publish & Deploy') {
-    steps {
-        sh """
-            echo "Publishing API..."
-            dotnet publish TMS.API/TMS.API.csproj \\
-                -c Release -o ./publish-api \\
-                --runtime linux-x64
-            
-            echo "Publishing Web (Blazor WASM)..."
-            dotnet publish TMS.Web/TMS.Web.csproj \\
-                -c Release -o ./publish-web \\
-                --runtime linux-x64
-            
-            echo "Deploying to /opt/tms-app/"
-            
-            # Create deployment directories
-            sudo mkdir -p /opt/tms-app/api
-            sudo mkdir -p /opt/tms-app/web
-            
-            # Stop services if they exist
-            sudo systemctl stop tms-api.service 2>/dev/null || true
-            sudo systemctl stop tms-web.service 2>/dev/null || true
-            
-            # Deploy API
-            sudo rm -rf /opt/tms-app/api/*
-            sudo cp -r ./publish-api/* /opt/tms-app/api/
-            sudo cp .env /opt/tms-app/api/
-            
-            # Deploy Web (Blazor WASM static files)
-            sudo rm -rf /opt/tms-app/web/*
-            sudo cp -r ./publish-web/wwwroot/* /opt/tms-app/web/
-            
-            # Fix permissions
-            sudo chown -R ec:ec /opt/tms-app
-            
-            # Create systemd service for API (since web is static)
-            sudo tee /etc/systemd/system/tms-api.service << 'API_SERVICE'
+        stage('Publish & Deploy') {
+            steps {
+                sh """
+                    echo "Publishing API..."
+                    dotnet publish TMS.API/TMS.API.csproj \\
+                        -c Release -o ./publish-api \\
+                        --runtime linux-x64
+                    
+                    echo "Publishing Web (Blazor WASM)..."
+                    dotnet publish TMS.Web/TMS.Web.csproj \\
+                        -c Release -o ./publish-web \\
+                        --runtime linux-x64
+                    
+                    echo "Deploying to /opt/tms-app/"
+                    
+                    # Create deployment directories
+                    sudo mkdir -p /opt/tms-app/api
+                    sudo mkdir -p /opt/tms-app/web
+                    
+                    # Stop services if they exist
+                    sudo systemctl stop tms-api.service 2>/dev/null || true
+                    sudo systemctl stop tms-web.service 2>/dev/null || true
+                    
+                    # Deploy API
+                    sudo rm -rf /opt/tms-app/api/*
+                    sudo cp -r ./publish-api/* /opt/tms-app/api/
+                    sudo cp .env /opt/tms-app/api/
+                    
+                    # Deploy Web (Blazor WASM static files)
+                    sudo rm -rf /opt/tms-app/web/*
+                    sudo cp -r ./publish-web/wwwroot/* /opt/tms-app/web/
+                    
+                    # Fix permissions
+                    sudo chown -R ec:ec /opt/tms-app
+                    
+                    # Create systemd service for API (ONLY if it doesn't exist)
+                    if [ ! -f "/etc/systemd/system/tms-api.service" ]; then
+                        sudo tee /etc/systemd/system/tms-api.service << 'API_SERVICE'
 [Unit]
 Description=TMS API Backend
 After=network.target
@@ -123,54 +123,41 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 [Install]
 WantedBy=multi-user.target
 API_SERVICE
-            
-            # Reload and start API service
-            sudo systemctl daemon-reload
-            sudo systemctl enable tms-api.service
-            sudo systemctl start tms-api.service
-            
-            # Configure nginx to serve Blazor static files
-            echo "Configuring nginx for Blazor WebAssembly..."
-            sudo tee /etc/nginx/sites-available/tms-web << 'NGINX_CONFIG'
-server {
-    listen 80;
-    server_name _;
-    
-    location / {
-        root /opt/tms-app/web;
-        try_files \$uri \$uri/ /index.html;
-        index index.html;
-    }
-    
-    # Proxy API requests to the .NET API
-    location /api {
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection keep-alive;
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-NGINX_CONFIG
-            
-            # Enable nginx site
-            sudo ln -sf /etc/nginx/sites-available/tms-web /etc/nginx/sites-enabled/
-            sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-            
-            # Test nginx config and restart
-            sudo nginx -t
-            sudo systemctl restart nginx
-            
-            echo "🚀 Deployment complete!"
-            echo "API running at: ${APP_URLS}"
-            echo "Web (Blazor) served by nginx on port 80"
-            echo "API proxied from /api to http://localhost:5000"
-        """
-    }
-}
+                    fi
+                    
+                    # Create systemd service for Web (simple HTTP server on port 7130)
+                    if [ ! -f "/etc/systemd/system/tms-web.service" ]; then
+                        sudo tee /etc/systemd/system/tms-web.service << 'WEB_SERVICE'
+[Unit]
+Description=TMS Web Frontend (Static Blazor)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/tms-app/web
+# Simple HTTP server for static files on port 7130
+ExecStart=/usr/bin/python3 -m http.server 7130
+Restart=always
+RestartSec=10
+User=ec
+Group=ec
+SyslogIdentifier=tms-web
+
+[Install]
+WantedBy=multi-user.target
+WEB_SERVICE
+                    fi
+                    
+                    # Reload and start services
+                    sudo systemctl daemon-reload
+                    sudo systemctl enable tms-api.service tms-web.service
+                    sudo systemctl start tms-api.service tms-web.service
+                    
+                    echo "🚀 Deployment complete!"
+                    echo "API running at: ${APP_URLS}"
+                    echo "Web running at: http://$(hostname -I | awk '{print \$1}'):7130"
+                """
+            }
+        }
     }
     
     post {
