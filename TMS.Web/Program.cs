@@ -12,13 +12,10 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 // Determine environment
 var env = builder.HostEnvironment.Environment;
-
-// Set API Base URL based on environment
-// Development: Visual Studio 2022
-// Production: Ubuntu 
 var apiBaseUrl = env == "Development"
-    ? "https://localhost:7130/"        // Local development API
-    : "http://192.168.49.1:5271/";     // Production API running on Ubuntu
+    ? "https://localhost:7130/"
+    : "http://10.0.2.15:7130/api/";
+
 
 // Blazored Storage & Toasts
 builder.Services.AddBlazoredLocalStorage();
