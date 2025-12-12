@@ -10,6 +10,10 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
+// Load appsettings.json + appsettings.{Environment}.json
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+                     .AddJsonFile($"appsettings.{builder.HostEnvironment.Environment}.json", optional: true);
+
 // Blazored Storage & Toasts
 builder.Services.AddBlazoredLocalStorage();
 builder.Services.AddBlazoredToast();
@@ -20,6 +24,7 @@ builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthMessageHandler>();
 
 // Configure HttpClient with the authorization handler
+var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? throw new Exception("ApiBaseUrl is not set in appsettings!");
 builder.Services.AddScoped(sp =>
 {
     var handler = sp.GetRequiredService<AuthMessageHandler>();
@@ -27,7 +32,7 @@ builder.Services.AddScoped(sp =>
 
     return new HttpClient(handler)
     {
-        BaseAddress = new Uri("https://localhost:7130/")
+        BaseAddress = new Uri(apiBaseUrl)
     };
 });
 
