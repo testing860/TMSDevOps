@@ -22,8 +22,3 @@
 [Rr]elease/
 [Rr]eleases/
 
-
-## Entity Framework Migration Files ##
-**/Migrations/*.Designer.cs
-**/Migrations/*Snapshot.cs
-
