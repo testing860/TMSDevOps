@@ -126,10 +126,9 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowTMSWeb", policy =>
     {
         policy.WithOrigins(
-            "https://localhost:7141", 
+            "https://localhost:7141",
             "https://localhost:7181",
-            "http://10.0.2.15:7130",
-            "http://192.168.49.1:7130"
+            "http://10.0.2.15:7130"
         )
         .AllowAnyHeader()
         .AllowAnyMethod()
