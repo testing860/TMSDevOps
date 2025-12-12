@@ -2,7 +2,6 @@ pipeline {
     agent any
     
     environment {
-        // REMOVE THIS LINE: JENKINS_DEPLOY_DIR = credentials('jenkins-deploy-dir')
         GITHUB_SSH_CREDENTIAL_ID = 'f2279fbb-b675-4191-bb6e-5e5c0d1421a5'
         DB_PASSWORD = credentials('tms-db-password')
         JWT_KEY = credentials('tms-jwt-key')
@@ -88,7 +87,6 @@ EOF
                     
                     # Stop services if they exist
                     sudo systemctl stop tms-api.service 2>/dev/null || true
-                    sudo systemctl stop tms-web.service 2>/dev/null || true
                     
                     # Deploy API
                     sudo rm -rf /opt/tms-app/api/*
@@ -125,36 +123,108 @@ WantedBy=multi-user.target
 API_SERVICE
                     fi
                     
-                    # Create systemd service for Web (simple HTTP server on port 7130)
-                    if [ ! -f "/etc/systemd/system/tms-web.service" ]; then
-                        sudo tee /etc/systemd/system/tms-web.service << 'WEB_SERVICE'
-[Unit]
-Description=TMS Web Frontend (Static Blazor)
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/tms-app/web
-# Simple HTTP server for static files on port 7130
-ExecStart=/usr/bin/python3 -m http.server 7130
-Restart=always
-RestartSec=10
-User=ec
-Group=ec
-SyslogIdentifier=tms-web
-
-[Install]
-WantedBy=multi-user.target
-WEB_SERVICE
+                    # Install nginx if not installed
+                    if ! command -v nginx &> /dev/null; then
+                        echo "Installing nginx..."
+                        sudo apt-get update
+                        sudo apt-get install -y nginx
                     fi
                     
-                    # Reload and start services
+                    # Configure nginx for Blazor WebAssembly on port 7130
+                    echo "Configuring nginx for Blazor WebAssembly..."
+                    sudo tee /etc/nginx/sites-available/tms << 'NGINX_CONFIG'
+server {
+    listen 7130;
+    server_name _;
+    
+    # Root directory for Blazor static files
+    root /opt/tms-app/web;
+    
+    # Serve index.html for all routes (SPA support)
+    location / {
+        try_files \\\$uri \\\$uri/ /index.html;
+        index index.html;
+    }
+    
+    # Cache static assets
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # Proxy API requests to the .NET API
+    location /api {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection keep-alive;
+        proxy_set_header Host \\\$host;
+        proxy_cache_bypass \\\$http_upgrade;
+        proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\\$scheme;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        
+        # Increase timeout for API calls
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+    
+    # Proxy WebSocket for SignalR/real-time features if needed
+    location /hubs {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \\\$host;
+    }
+    
+    # Health check endpoint
+    location /health {
+        proxy_pass http://localhost:5000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host \\\$host;
+        access_log off;
+    }
+}
+NGINX_CONFIG
+                    
+                    # Enable the site and disable default
+                    sudo ln -sf /etc/nginx/sites-available/tms /etc/nginx/sites-enabled/
+                    sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+                    
+                    # Test nginx configuration
+                    sudo nginx -t
+                    
+                    # Restart nginx
+                    sudo systemctl restart nginx
+                    
+                    # Reload and start API service
                     sudo systemctl daemon-reload
-                    sudo systemctl enable tms-api.service tms-web.service
-                    sudo systemctl start tms-api.service tms-web.service
+                    sudo systemctl enable tms-api.service
+                    sudo systemctl start tms-api.service
+                    
+                    # Allow port 7130 in firewall
+                    sudo ufw allow 7130/tcp 2>/dev/null || true
+                    
+                    # Wait a moment for services to start
+                    sleep 5
+                    
+                    # Test services
+                    echo "Testing API..."
+                    API_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/health || echo "failed")
+                    echo "API health check: \${API_STATUS}"
+                    
+                    echo "Testing Web via nginx..."
+                    WEB_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:7130/ || echo "failed")
+                    echo "Web access: \${WEB_STATUS}"
                     
                     echo "🚀 Deployment complete!"
-                    echo "API running at: ${APP_URLS}"
-                    echo "Web running at: http://$(hostname -I | awk '{print \$1}'):7130"
+                    echo "API running at: \${APP_URLS}"
+                    echo "Web (Blazor) served by nginx on port 7130"
+                    echo "Access your app at: http://\$(hostname -I | awk '{print \\\$1}'):7130"
+                    echo "API is available at: http://\$(hostname -I | awk '{print \\\$1}'):5000"
+                    echo "API proxy: http://\$(hostname -I | awk '{print \\\$1}'):7130/api"
                 """
             }
         }
