@@ -14,7 +14,7 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 var env = builder.HostEnvironment.Environment;
 var apiBaseUrl = env == "Development"
     ? "https://localhost:7130/"
-    : "http://10.0.2.15:7130/api/";
+    : "http://10.0.2.15:7130/";
 
 
 // Blazored Storage & Toasts
