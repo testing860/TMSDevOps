@@ -10,9 +10,15 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
-// Load appsettings.json + appsettings.{Environment}.json
-builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
-                     .AddJsonFile($"appsettings.{builder.HostEnvironment.Environment}.json", optional: true);
+// Determine environment
+var env = builder.HostEnvironment.Environment;
+
+// Set API Base URL based on environment
+// Development: Visual Studio 2022
+// Production: Ubuntu 
+var apiBaseUrl = env == "Development"
+    ? "https://localhost:7130/"        // Local development API
+    : "http://192.168.49.1:5271/";     // Production API running on Ubuntu
 
 // Blazored Storage & Toasts
 builder.Services.AddBlazoredLocalStorage();
@@ -24,7 +30,6 @@ builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthMessageHandler>();
 
 // Configure HttpClient with the authorization handler
-var apiBaseUrl = builder.Configuration["ApiBaseUrl"] ?? throw new Exception("ApiBaseUrl is not set in appsettings!");
 builder.Services.AddScoped(sp =>
 {
     var handler = sp.GetRequiredService<AuthMessageHandler>();
