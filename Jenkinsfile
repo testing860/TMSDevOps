@@ -71,36 +71,45 @@ EOF
 stage('Publish & Deploy') {
     steps {
         sh """
-            echo "Publishing application..."
+            echo "Publishing API..."
             dotnet publish TMS.API/TMS.API.csproj \\
-                -c Release -o ./publish \\
+                -c Release -o ./publish-api \\
                 --runtime linux-x64
             
-            echo "Deploying to: ${JENKINS_DEPLOY_DIR}"
+            echo "Publishing Web..."
+            dotnet publish TMS.Web/TMS.Web.csproj \\
+                -c Release -o ./publish-web \\
+                --runtime linux-x64
             
-            # Stop the service
-            sudo systemctl stop tms-app.service 2>/dev/null || true
+            echo "Deploying to /opt/tms-app/"
             
-            # Clear deployment directory
-            sudo rm -rf ${JENKINS_DEPLOY_DIR}/*
+            # Create deployment directories
+            sudo mkdir -p /opt/tms-app/api
+            sudo mkdir -p /opt/tms-app/web
             
-            # Create TMS.API directory in deployment location
-            sudo mkdir -p ${JENKINS_DEPLOY_DIR}/TMS.API
+            # Stop services
+            sudo systemctl stop tms-api.service 2>/dev/null || true
+            sudo systemctl stop tms-web.service 2>/dev/null || true
             
-            # Move all published files into TMS.API directory
-            sudo cp -r ./publish/* ${JENKINS_DEPLOY_DIR}/TMS.API/
+            # Deploy API
+            sudo rm -rf /opt/tms-app/api/*
+            sudo cp -r ./publish-api/* /opt/tms-app/api/
+            sudo cp .env /opt/tms-app/api/
             
-            # Copy .env file to TMS.API directory
-            sudo cp .env ${JENKINS_DEPLOY_DIR}/TMS.API/
+            # Deploy Web
+            sudo rm -rf /opt/tms-app/web/*
+            sudo cp -r ./publish-web/* /opt/tms-app/web/
             
             # Fix permissions
-            sudo chown -R ec:ec ${JENKINS_DEPLOY_DIR} || sudo chown -R jenkins:jenkins ${JENKINS_DEPLOY_DIR}
+            sudo chown -R ec:ec /opt/tms-app
             
-            # Start the service
-            sudo systemctl start tms-app.service
+            # Start services
+            sudo systemctl start tms-api.service
+            sudo systemctl start tms-web.service
             
-            echo "🚀 Deployment complete!"
-            echo "Application running at: ${APP_URLS}"
+            echo "🚀 Both API and Web deployed!"
+            echo "API running at: ${APP_URLS}"
+            echo "Web frontend available"
         """
     }
 }
