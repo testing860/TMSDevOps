@@ -19,8 +19,6 @@ pipeline {
         stage('Clean Repository Structure') {
             steps {
                 sh '''
-                    #!/bin/bash
-                    set -e
                     echo "🧹 Cleaning repository structure..."
                     if [ -d "TMS.Web/TMS.API" ]; then
                         echo "❌ Found incorrect TMS.API folder inside TMS.Web - removing..."
@@ -33,11 +31,8 @@ pipeline {
         stage('Build & Test Application') {
             steps {
                 sh '''
-                    #!/bin/bash
-                    set -e
                     echo "Building .NET solution..."
                     dotnet build --configuration Release --verbosity minimal
-
                     echo "Running tests..."
                     dotnet test --configuration Release --logger trx --no-build
                 '''
@@ -47,35 +42,32 @@ pipeline {
         stage('Prepare Environment') {
             steps {
                 sh '''
-                    #!/bin/bash
-                    set -e
                     echo "🔧 Creating .env file..."
-                    cat > .env << 'ENV_EOF'
+                    
+                    # Store credentials in temporary variables
+                    DB_PASS='"'"${DB_PASSWORD}"'"'
+                    JWT_KEY_VAL='"'"${JWT_KEY}"'"'
+                    ADMIN_PASS='"'"${ADMIN_PASSWORD}"'"'
+                    
+                    cat > .env << EOF
 DB_SERVER=sql-server
 DB_NAME=TaskManagementSystem
 DB_USER=sa
-DB_PASSWORD=PLACEHOLDER_DB_PASSWORD
+DB_PASSWORD=${DB_PASS}
 
-JWT_KEY=PLACEHOLDER_JWT_KEY
+JWT_KEY=${JWT_KEY_VAL}
 JWT_ISSUER=TMSAPI
 JWT_AUDIENCE=TMSWebClient
 
 ADMIN_EMAIL=admin@tms.com
-ADMIN_PASSWORD=PLACEHOLDER_ADMIN_PASSWORD
+ADMIN_PASSWORD=${ADMIN_PASS}
 ADMIN_DISPLAYNAME=Admin
 
 ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=http://+:5000
-ENV_EOF
-
-                    # Replace placeholders with actual credentials (shell will expand the env vars)
-                    sed -i "s|PLACEHOLDER_DB_PASSWORD|$DB_PASSWORD|g" .env
-                    sed -i "s|PLACEHOLDER_JWT_KEY|$JWT_KEY|g" .env
-                    sed -i "s|PLACEHOLDER_ADMIN_PASSWORD|$ADMIN_PASSWORD|g" .env
-
-                    # Lock down the .env until it's copied into DEPLOY_PATH
-                    chmod 600 .env || true
-
+EOF
+                    
+                    chmod 600 .env
                     echo "✅ .env file created"
                 '''
             }
@@ -83,106 +75,79 @@ ENV_EOF
 
         stage('Deploy Locally') {
             steps {
-                // Use single-quoted script blocks so Groovy does not interpolate secrets
                 sh '''
-                    #!/bin/bash
-                    set -euo pipefail
-
+                    set -e  # Exit on error, but not pipefail
                     echo "🚀 Starting local Docker deployment"
-                    echo "Workspace: $WORKSPACE"
-                    echo "Deploy path: $DEPLOY_PATH"
+                    echo "Workspace: ${WORKSPACE}"
+                    echo "Deploy path: ${DEPLOY_PATH}"
 
-                    cd "$WORKSPACE"
+                    cd "${WORKSPACE}"
 
                     echo "=== Checking Docker installation ==="
                     if ! command -v docker >/dev/null 2>&1; then
-                        echo "❌ Docker is not installed or not in PATH. Ensure the Jenkins agent has Docker."
+                        echo "❌ Docker is not installed"
                         exit 1
                     fi
 
-                    # determine docker-compose command (support v1 and v2)
-                    DC_CMD=""
+                    # Check for docker-compose (v1) or docker compose (v2)
                     if command -v docker-compose >/dev/null 2>&1; then
                         DC_CMD="docker-compose"
+                        echo "✅ Using docker-compose (v1)"
                     elif docker compose version >/dev/null 2>&1; then
                         DC_CMD="docker compose"
+                        echo "✅ Using docker compose (v2)"
                     else
-                        echo "❌ Docker Compose is not available (checked 'docker-compose' and 'docker compose')."
+                        echo "❌ Docker Compose not found"
                         exit 1
                     fi
 
-                    echo "✅ Docker: $(docker --version)"
-                    echo "✅ Docker Compose: $($DC_CMD --version 2>/dev/null || true)"
-
-                    echo "=== STEP 1: Stop old TMS systemd service (if present) ==="
+                    echo "=== STEP 1: Stop old TMS services ==="
                     sudo systemctl stop tms-api.service 2>/dev/null || true
                     sudo systemctl disable tms-api.service 2>/dev/null || true
 
-                    echo "=== STEP 2: Remove old nginx config (if present) ==="
+                    echo "=== STEP 2: Remove old nginx config ==="
                     sudo rm -f /etc/nginx/sites-enabled/tms 2>/dev/null || true
                     sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
-                    sudo systemctl restart nginx 2>/dev/null || true || true
+                    sudo systemctl restart nginx 2>/dev/null || true
 
                     echo "=== STEP 3: Prepare deployment directory ==="
-                    sudo mkdir -p "$DEPLOY_PATH"
-                    sudo cp -f .env "$DEPLOY_PATH/" || true
-                    sudo chmod 600 "$DEPLOY_PATH/.env" || true
+                    sudo mkdir -p "${DEPLOY_PATH}"
+                    sudo cp -f .env "${DEPLOY_PATH}/" || true
+                    sudo chmod 600 "${DEPLOY_PATH}/.env" || true
 
-                    echo "Copying project files (patterns: *.yml, Dockerfile*, *.sln)..."
-                    # safe loop to avoid Groovy parsing issues with find escaping
-                    for pattern in *.yml Dockerfile* *.sln; do
-                        # expand glob, copy files if exist
-                        for f in $pattern; do
-                            if [ -e "$f" ]; then
-                                echo "Copying $f -> $DEPLOY_PATH/"
-                                sudo cp -r "$f" "$DEPLOY_PATH/" || true
-                            fi
-                        done
-                    done
-
-                    # copy directories (projects)
-                    if [ -d "TMS.API" ]; then
-                        sudo rm -rf "$DEPLOY_PATH/TMS.API" 2>/dev/null || true
-                        sudo cp -r TMS.API "$DEPLOY_PATH/" || true
-                    fi
-                    if [ -d "TMS.Web" ]; then
-                        sudo rm -rf "$DEPLOY_PATH/TMS.Web" 2>/dev/null || true
-                        sudo cp -r TMS.Web "$DEPLOY_PATH/" || true
-                    fi
-                    if [ -d "TMS.Shared" ]; then
-                        sudo rm -rf "$DEPLOY_PATH/TMS.Shared" 2>/dev/null || true
-                        sudo cp -r TMS.Shared "$DEPLOY_PATH/" || true
-                    fi
-
-                    sudo chown -R jenkins:jenkins "$DEPLOY_PATH/" || true
-                    echo "✅ Files copied to $DEPLOY_PATH"
+                    echo "Copying project files..."
+                    sudo cp -f docker-compose.yml Dockerfile "${DEPLOY_PATH}/" 2>/dev/null || true
+                    sudo cp -f TMS.Web/Dockerfile "${DEPLOY_PATH}/TMS.Web/" 2>/dev/null || true
+                    sudo cp -f TMS.Web/nginx.conf "${DEPLOY_PATH}/TMS.Web/" 2>/dev/null || true
+                    
+                    # Copy project directories
+                    sudo rm -rf "${DEPLOY_PATH}/TMS.API" 2>/dev/null || true
+                    sudo rm -rf "${DEPLOY_PATH}/TMS.Web" 2>/dev/null || true
+                    sudo rm -rf "${DEPLOY_PATH}/TMS.Shared" 2>/dev/null || true
+                    
+                    sudo cp -r TMS.API TMS.Web TMS.Shared "${DEPLOY_PATH}/" || true
+                    sudo chown -R jenkins:jenkins "${DEPLOY_PATH}/" || true
+                    echo "✅ Files copied to ${DEPLOY_PATH}"
 
                     echo "=== STEP 4: Build and start Docker containers ==="
-                    cd "$DEPLOY_PATH"
+                    cd "${DEPLOY_PATH}"
 
-                    # stop existing containers for this compose
                     echo "Stopping any existing containers..."
-                    sudo $DC_CMD down --remove-orphans || true
+                    ${DC_CMD} down --remove-orphans 2>/dev/null || true
 
                     echo "Building Docker images..."
-                    sudo $DC_CMD build --no-cache
+                    ${DC_CMD} build --no-cache
 
                     echo "Starting containers..."
-                    sudo $DC_CMD up -d
+                    ${DC_CMD} up -d
 
                     echo "=== STEP 5: Wait for SQL Server to be ready ==="
-                    # Wait a bit for services to initialize
-                    sleep 5
-
+                    sleep 10
+                    
                     SQL_OK=false
-                    for i in {1..30}; do
-                        # try both common sqlcmd paths in container; ignore errors if container not yet ready
-                        if sudo $DC_CMD exec -T sql-server /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -Q "SELECT 1" >/dev/null 2>&1; then
-                            SQL_OK=true
-                            echo "✅ SQL Server is ready (attempt $i)"
-                            break
-                        fi
-                        if sudo $DC_CMD exec -T sql-server /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -Q "SELECT 1" >/dev/null 2>&1; then
+                    for i in $(seq 1 30); do
+                        # Try to connect to SQL Server
+                        if ${DC_CMD} exec -T sql-server /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "SELECT 1" >/dev/null 2>&1; then
                             SQL_OK=true
                             echo "✅ SQL Server is ready (attempt $i)"
                             break
@@ -192,14 +157,14 @@ ENV_EOF
                     done
 
                     if [ "$SQL_OK" = "false" ]; then
-                        echo "❌ SQL Server failed to start in time. Showing logs (tail 100):"
-                        sudo $DC_CMD logs sql-server --tail=100 || true
+                        echo "❌ SQL Server failed to start"
+                        ${DC_CMD} logs sql-server --tail=50 || true
                         exit 1
                     fi
 
                     echo "=== STEP 6: Wait for API to respond ==="
                     API_OK=false
-                    for i in {1..20}; do
+                    for i in $(seq 1 20); do
                         if curl -s -f http://localhost:5000/swagger >/dev/null 2>&1; then
                             API_OK=true
                             echo "✅ API responded (attempt $i)"
@@ -211,7 +176,7 @@ ENV_EOF
 
                     echo "=== STEP 7: Wait for Web to respond ==="
                     WEB_OK=false
-                    for i in {1..15}; do
+                    for i in $(seq 1 15); do
                         if curl -s -f http://localhost:7130 >/dev/null 2>&1; then
                             WEB_OK=true
                             echo "✅ Web responded (attempt $i)"
@@ -221,10 +186,10 @@ ENV_EOF
                         sleep 2
                     done
 
-                    echo "=== STEP 8: Final verification & status ==="
-                    sudo $DC_CMD ps || true
+                    echo "=== STEP 8: Final verification ==="
+                    ${DC_CMD} ps || true
 
-                    SERVER_IP="$(hostname -I | awk '{print $1}')"
+                    SERVER_IP=$(hostname -I | awk '{print $1}')
                     echo "Server IP: $SERVER_IP"
 
                     API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/swagger || echo "000")
@@ -235,19 +200,16 @@ ENV_EOF
 
                     if [ "$API_STATUS" = "200" ] && ( [ "$WEB_STATUS" = "200" ] || [ "$WEB_STATUS" = "304" ] ); then
                         echo "✅ All services are responding correctly!"
+                        echo ""
+                        echo "🎉 DOCKER DEPLOYMENT COMPLETE"
+                        echo "Web Interface:  http://$SERVER_IP:7130"
+                        echo "API Swagger:    http://$SERVER_IP:5000/swagger"
+                        echo "SQL Server:     $SERVER_IP:1433"
                     else
-                        echo "⚠️ Some services may not be fully healthy. Showing last 200 log lines:"
-                        sudo $DC_CMD logs --tail=200 || true
+                        echo "⚠️ Some services may not be fully healthy"
+                        ${DC_CMD} logs --tail=50 || true
+                        exit 1
                     fi
-
-                    echo ""
-                    echo "========================================"
-                    echo "🎉 DOCKER DEPLOYMENT COMPLETE"
-                    echo "========================================"
-                    echo "Web Interface:  http://$SERVER_IP:7130"
-                    echo "API Swagger:    http://$SERVER_IP:5000/swagger"
-                    echo "SQL Server:     $SERVER_IP:1433"
-                    echo ""
                 '''
             }
         }
@@ -265,4 +227,3 @@ ENV_EOF
         }
     }
 }
-
