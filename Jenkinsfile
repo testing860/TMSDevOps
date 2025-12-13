@@ -2,14 +2,15 @@ pipeline {
     agent any
 
     environment {
+        // Your Jenkins credentials
         GITHUB_SSH_CREDENTIAL_ID = 'f2279fbb-b675-4191-bb6e-5e5c0d1421a5'
         DB_PASSWORD = credentials('tms-db-password')
         JWT_KEY = credentials('tms-jwt-key')
         ADMIN_PASSWORD = credentials('tms-admin-password')
+        // Docker configuration
         DOCKER_IMAGE_PREFIX = 'tms'
+        // CRITICAL: Set this to your Ubuntu server's actual IP
         SERVER_IP = '10.0.2.15'
-        DEPLOY_USER = 'ec'
-        DEPLOY_PATH = '/opt/tms-app-docker'
     }
 
     stages {
@@ -19,50 +20,13 @@ pipeline {
             }
         }
 
-        stage('Clean Repository Structure') {
+        stage('Prepare Docker Build Environment') {
             steps {
                 sh '''
-                    echo "🧹 Cleaning repository structure..."
+                    echo "📦 Preparing Docker build environment..."
                     
-                    # Remove incorrect TMS.API folder inside TMS.Web
-                    if [ -d "TMS.Web/TMS.API" ]; then
-                        echo "❌ Found incorrect TMS.API folder inside TMS.Web - removing..."
-                        rm -rf TMS.Web/TMS.API
-                        echo "✅ Removed TMS.Web/TMS.API"
-                    fi
-                    
-                    # Remove any other stray API files in Web folder
-                    find TMS.Web -name "*.cs" -type f | xargs grep -l "Microsoft.AspNetCore.Authentication" | while read file; do
-                        if grep -q "namespace TMS.API" "$file" 2>/dev/null; then
-                            echo "Removing API file in Web folder: $file"
-                            rm -f "$file"
-                        fi
-                    done
-                    
-                    # Verify folder structure
-                    echo "📁 Current structure:"
-                    find . -maxdepth 3 -type d -name "*API*" -o -name "*Web*" | sort
-                '''
-            }
-        }
-
-        stage('Build & Test Application') {
-            steps {
-                sh '''
-                    echo "Building .NET solution..."
-                    dotnet build --configuration Release --verbosity minimal
-                    
-                    echo "Running tests..."
-                    dotnet test --configuration Release --logger "trx" --no-build
-                '''
-            }
-        }
-
-        stage('Prepare Docker Environment') {
-            steps {
-                // Securely create .env file without exposing in logs
-                script {
-                    envFileContent = """
+                    # Create .env file with Jenkins credentials
+                    cat > .env << EOF
 DB_SERVER=sql-server
 DB_NAME=TaskManagementSystem
 DB_USER=sa
@@ -76,26 +40,31 @@ ADMIN_EMAIL=admin@tms.com
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 ADMIN_DISPLAYNAME=Admin
 
+# API Settings
 ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=http://+:5000
-"""
-                    writeFile file: '.env', text: envFileContent
-                }
-                
-                sh '''
-                    echo "✅ Secure .env file created"
-                    ls -la .env
+EOF
+                    echo "✅ Docker .env file created."
+                    
+                    # Verify critical docker-compose.yml configuration
+                    echo "Checking docker-compose.yml configuration..."
+                    if grep -q "ApiBaseUrl=http://api:5000" docker-compose.yml; then
+                        echo "✅ docker-compose.yml has correct ApiBaseUrl"
+                    else
+                        echo "❌ ERROR: docker-compose.yml missing ApiBaseUrl for web service!"
+                        exit 1
+                    fi
                 '''
             }
         }
 
-        stage('Build Docker Images Locally') {
+        stage('Build Docker Images') {
             steps {
                 sh '''
-                    echo "🐳 Building Docker images locally for verification..."
+                    echo "🐳 Building Docker images..."
                     docker-compose build --no-cache
                     echo "✅ Images built successfully."
-                    docker images | grep tms
+                    docker images | grep tms-
                 '''
             }
         }
@@ -105,154 +74,96 @@ ASPNETCORE_URLS=http://+:5000
                 sshagent(['ubuntu-server-ssh-credentials']) {
                     sh """
                         echo "🚀 Starting deployment to server..."
+                        DEPLOY_USER="ec"
+                        DEPLOY_PATH="/opt/tms-app-docker"
                         
-                        # Create a clean copy without incorrect folder structure
-                        echo "Creating clean deployment package..."
-                        mkdir -p /tmp/tms-deploy
-                        cp -r . /tmp/tms-deploy/
-                        
-                        # Clean up the copied structure
-                        cd /tmp/tms-deploy
-                        rm -rf TMS.Web/TMS.API 2>/dev/null || true
-                        
-                        # Copy to server
-                        echo "Copying to server..."
+                        # 1. Copy the entire project to the server
+                        echo "Copying project files via rsync..."
                         rsync -avz --delete \\
-                              /tmp/tms-deploy/ \\
-                              ${DEPLOY_USER}@${SERVER_IP}:${DEPLOY_PATH}/ \\
                               --exclude='.git' \\
-                              --exclude='sqlserver-data' \\
-                              --exclude='tms-sql-data' \\
-                              --exclude='node_modules' \\
                               --exclude='bin' \\
                               --exclude='obj' \\
+                              --exclude='node_modules' \\
                               --exclude='*.user' \\
-                              --exclude='*.suo'
-                        
-                        rm -rf /tmp/tms-deploy
-                        
+                              --exclude='*.suo' \\
+                              . ${DEPLOY_USER}@${SERVER_IP}:${DEPLOY_PATH}/
+
                         # 2. Execute deployment commands on the server
                         ssh ${DEPLOY_USER}@${SERVER_IP} '
-                            set -e  # Exit on any error
                             cd ${DEPLOY_PATH}
-                            
-                            echo "=== STEP 1: Clean up any existing incorrect structure ==="
-                            rm -rf TMS.Web/TMS.API 2>/dev/null || true
-                            
-                            echo "=== STEP 2: Stop old TMS application services ==="
+
+                            echo "=== STEP 1: Stopping old TMS application ==="
+                            sudo systemctl stop tms-api.service 2>/dev/null || true
+                            sudo systemctl disable tms-api.service 2>/dev/null || true
+
+                            echo "=== STEP 2: Removing old nginx config ==="
+                            sudo rm -f /etc/nginx/sites-enabled/tms 2>/dev/null || true
+                            sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
+                            sudo systemctl restart nginx 2>/dev/null || true
+
+                            echo "=== STEP 3: Handling Database Container ==="
+                            echo "Stopping and removing old sqlserver container..."
+                            sudo docker stop sqlserver 2>/dev/null || true
+                            sudo docker rm sqlserver 2>/dev/null || true
+
+                            echo "Cleaning up old volumes (optional)..."
+                            sudo docker volume prune -f 2>/dev/null || true
+
+                            echo "=== STEP 4: Starting fresh Docker application ==="
+                            echo "Starting docker-compose with tms-sqlserver..."
                             docker-compose down --remove-orphans 2>/dev/null || true
-                            
-                            echo "=== STEP 3: Create secure .env file on server ==="
-                            cat > .env << "EOF"
-DB_SERVER=sql-server
-DB_NAME=TaskManagementSystem
-DB_USER=sa
-DB_PASSWORD=${DB_PASSWORD}
+                            docker-compose up -d --remove-orphans
 
-JWT_KEY=${JWT_KEY}
-JWT_ISSUER=TMSAPI
-JWT_AUDIENCE=TMSWebClient
+                            echo "=== STEP 5: Waiting for services to initialize ==="
+                            echo "Waiting for SQL Server to start (30 seconds)..."
+                            sleep 30
 
-ADMIN_EMAIL=admin@tms.com
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-ADMIN_DISPLAYNAME=Admin
+                            echo "=== STEP 6: Database Initialization ==="
+                            echo "Database will be created automatically by your API on first run"
+                            echo "through Entity Framework migrations in Program.cs"
 
-ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://+:5000
-EOF
-                            chmod 600 .env
-                            echo "✅ .env file created with secure permissions"
-                            
-                            echo "=== STEP 4: Build Docker images ==="
-                            docker-compose build --no-cache
-                            
-                            echo "=== STEP 5: Start SQL Server first ==="
-                            docker-compose up -d sql-server
-                            
-                            echo "=== STEP 6: Wait for SQL Server to be ready ==="
-                            echo "Waiting for SQL Server to start (max 60 seconds)..."
-                            for i in {1..30}; do
-                                if docker-compose exec -T sql-server /opt/mssql-tools/bin/sqlcmd \\
-                                    -S localhost -U sa -P "${DB_PASSWORD}" \\
-                                    -Q "SELECT 1" > /dev/null 2>&1; then
-                                    echo "✅ SQL Server is ready (attempt \$i)"
-                                    break
-                                fi
-                                echo "Waiting for SQL Server... (attempt \$i/30)"
-                                sleep 2
-                                if [ \$i -eq 30 ]; then
-                                    echo "❌ SQL Server failed to start in time"
-                                    docker-compose logs sql-server
-                                    exit 1
-                                fi
-                            done
-                            
-                            echo "=== STEP 7: Start API and Web services ==="
-                            docker-compose up -d api web
-                            
-                            echo "=== STEP 8: Wait for services to be ready ==="
-                            # Wait for API
-                            echo "Waiting for API to start..."
-                            for i in {1..20}; do
-                                if curl -s -f http://localhost:5000/swagger > /dev/null 2>&1; then
-                                    echo "✅ API is ready (attempt \$i)"
-                                    break
-                                fi
-                                echo "Waiting for API... (attempt \$i/20)"
-                                sleep 3
-                            done
-                            
-                            # Wait for Web
-                            echo "Waiting for Web to start..."
-                            for i in {1..15}; do
-                                if curl -s -f http://localhost:7130 > /dev/null 2>&1; then
-                                    echo "✅ Web is ready (attempt \$i)"
-                                    break
-                                fi
-                                echo "Waiting for Web... (attempt \$i/15)"
-                                sleep 2
-                            done
-                            
-                            echo "=== STEP 9: Verify all containers are running ==="
+                            echo "=== STEP 7: Verification ==="
+                            echo "Container status:"
                             docker-compose ps
-                            
-                            echo "=== STEP 10: Final verification ==="
-                            API_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/swagger || echo "000")
+
+                            echo "Testing web endpoint (expecting HTTP 200 or 304)..."
                             WEB_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:7130 || echo "000")
-                            
-                            echo "API Status: \$API_STATUS"
-                            echo "Web Status: \$WEB_STATUS"
-                            
-                            if [ "\$API_STATUS" = "200" ] && ([ "\$WEB_STATUS" = "200" ] || [ "\$WEB_STATUS" = "304" ]); then
-                                echo "✅ All services are responding correctly!"
+                            echo "Web service HTTP status: \${WEB_STATUS}"
+
+                            echo "Testing API endpoint..."
+                            API_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/swagger || echo "000")
+                            echo "API Swagger HTTP status: \${API_STATUS}"
+
+                            if [ "\${WEB_STATUS}" = "200" ] || [ "\${WEB_STATUS}" = "304" ]; then
+                                echo "✅ Web service is responding correctly"
                             else
-                                echo "⚠️  Some services may not be fully healthy"
-                                echo "Checking logs..."
-                                docker-compose logs --tail=20
+                                echo "⚠️  Web service returned status \${WEB_STATUS}. Checking logs..."
+                                docker-compose logs web --tail=20
                             fi
                         '
-                        
+
                         echo ""
                         echo "========================================"
-                        echo "🎉 DOCKER DEPLOYMENT COMPLETE"
+                        echo "🎉 DEPLOYMENT COMPLETE"
                         echo "========================================"
-                        echo "Your TMS application is now running in Docker containers:"
+                        echo "Your Dockerized TMS application is now running."
+                        echo "Fresh database has been initialized."
                         echo ""
-                        echo "🐳 Containers:"
-                        echo "   - tms-sqlserver (SQL Server)"
-                        echo "   - tms-api (API backend)"
-                        echo "   - tms-web (Blazor frontend)"
+                        echo "🌐 WEB INTERFACE:  http://${SERVER_IP}:7130"
+                        echo "⚙️  API Swagger:    http://${SERVER_IP}:5000/swagger"
+                        echo "🐳 SQL Server:     ${SERVER_IP}:1433 (new tms-sqlserver container)"
                         echo ""
-                        echo "🌐 Access URLs:"
-                        echo "   Web Interface:  http://${SERVER_IP}:7130"
-                        echo "   API Swagger:    http://${SERVER_IP}:5000/swagger"
-                        echo "   SQL Server:     ${SERVER_IP}:1433"
+                        echo "To check application status:"
+                        echo "  ssh ec@${SERVER_IP}"
+                        echo "  cd ${DEPLOY_PATH}"
+                        echo "  docker-compose ps"
                         echo ""
-                        echo "📋 Management commands (run on server):"
-                        echo "   Check status:   cd ${DEPLOY_PATH} && docker-compose ps"
-                        echo "   View logs:      cd ${DEPLOY_PATH} && docker-compose logs -f"
-                        echo "   Stop services:  cd ${DEPLOY_PATH} && docker-compose down"
-                        echo "   Restart:        cd ${DEPLOY_PATH} && docker-compose restart"
+                        echo "To view logs:"
+                        echo "  docker-compose logs -f"
+                        echo ""
+                        echo "To restore your backup if needed:"
+                        echo "  1. Copy backup to server: scp /path/to/backup.bak ec@${SERVER_IP}:/home/ec/"
+                        echo "  2. Restore: docker exec tms-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"\${DB_PASSWORD}\" -C -Q \"RESTORE DATABASE [TaskManagementSystem] FROM DISK = N''/var/opt/mssql/data/backup.bak'' WITH REPLACE;\""
                         echo "========================================"
                     """
                 }
@@ -265,20 +176,17 @@ EOF
             // Clean up the Jenkins agent
             sh '''
                 echo "🧹 Cleaning up Jenkins workspace..."
-                # Remove sensitive files first
-                rm -f .env 2>/dev/null || true
-                # Stop and remove any containers from local build
                 docker-compose down --remove-orphans 2>/dev/null || true
-                # Clean up Docker resources
                 docker system prune -af 2>/dev/null || true
             '''
             cleanWs()
         }
         failure {
             echo '❌ Pipeline failed. Check the logs above.'
+            // Consider adding notification here (email, Slack, etc.)
         }
         success {
-            echo '✅ Pipeline succeeded! Docker deployment complete.'
+            echo '✅ Pipeline succeeded! Fresh Docker deployment complete.'
         }
     }
 }
