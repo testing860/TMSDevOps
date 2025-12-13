@@ -6,8 +6,8 @@ pipeline {
         DB_PASSWORD = credentials('tms-db-password')
         JWT_KEY = credentials('tms-jwt-key')
         ADMIN_PASSWORD = credentials('tms-admin-password')
-        SERVER_IP = '10.0.2.15'  # Your Ubuntu VM IP
-        DEPLOY_USER = 'ec'        # Your Ubuntu user
+        SERVER_IP = '10.0.2.15'
+        DEPLOY_USER = 'ec'
         DEPLOY_PATH = '/opt/tms-app-docker'
     }
 
