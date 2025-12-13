@@ -1,0 +1,62 @@
+services:
+  sql-server:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: tms-sqlserver
+    env_file:
+       - .env
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${DB_PASSWORD}
+      - MSSQL_PID=Express
+    volumes:
+      - ./sqlserver-data:/var/opt/mssql/data
+    ports:
+      - "1433:1433"
+    restart: unless-stopped
+    networks:
+      - tms-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tms-api
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_SERVER=sql-server
+      - DB_NAME=${DB_NAME:-TaskManagementSystem}
+      - DB_USER=sa
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_KEY=${JWT_KEY}
+      - JWT_ISSUER=${JWT_ISSUER:-TMSAPI}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-TMSWebClient}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tms.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Test123!}
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+    depends_on:
+      - sql-server
+    networks:
+      - tms-network
+
+  web:
+    build:
+      context: .
+      dockerfile: TMS.Web/Dockerfile
+    container_name: tms-web
+    ports:
+      - "7130:80"
+    environment:
+      - ApiBaseUrl=http://api:5000
+    depends_on:
+      - api
+    networks:
+      - tms-network
+
+networks:
+  tms-network:
+    driver: bridge
+
+volumes:
+  tms-sql-data:

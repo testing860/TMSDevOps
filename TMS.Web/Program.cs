@@ -7,26 +7,43 @@ using TMS.Web;
 using TMS.Web.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
+
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
-// Determine environment
-var env = builder.HostEnvironment.Environment;
-var apiBaseUrl = env == "Development"
-    ? "https://localhost:7130/"
-    : "http://10.0.2.15:7130/";
+// ================================
+// API BASE URL Configuration
+// ================================
+// Try to get from environment variable first (Docker), then from config
+var apiBaseUrl = Environment.GetEnvironmentVariable("ApiBaseUrl");
+if (string.IsNullOrWhiteSpace(apiBaseUrl))
+{
+    apiBaseUrl = builder.Configuration["ApiBaseUrl"];
+}
 
+if (string.IsNullOrWhiteSpace(apiBaseUrl))
+{
+    // Fallback for development
+    apiBaseUrl = builder.HostEnvironment.IsDevelopment()
+        ? "https://localhost:7130/"
+        : "http://localhost:5000/";
+}
 
-// Blazored Storage & Toasts
+Console.WriteLine($"API Base URL: {apiBaseUrl}");
+
+// ================================
+// Services
+// ================================
+
 builder.Services.AddBlazoredLocalStorage();
 builder.Services.AddBlazoredToast();
 
-// Authentication State Provider
+// Authentication & Authorization
 builder.Services.AddScoped<AuthenticationStateProvider, AuthStateProvider>();
 builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthMessageHandler>();
 
-// Configure HttpClient with the authorization handler
+// HttpClient with JWT handler
 builder.Services.AddScoped(sp =>
 {
     var handler = sp.GetRequiredService<AuthMessageHandler>();
@@ -38,7 +55,7 @@ builder.Services.AddScoped(sp =>
     };
 });
 
-// Register Services
+// App Services
 builder.Services.AddScoped<ApiClient>();
 builder.Services.AddScoped<AuthService>();
 
