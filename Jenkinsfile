@@ -40,6 +40,39 @@ pipeline {
             }
         }
 
+        stage('Prepare Environment') {
+            steps {
+                sh '''
+                    echo "🔧 Creating .env file..."
+                    # Create .env file with masked credentials
+                    cat > .env << 'ENV_EOF'
+DB_SERVER=sql-server
+DB_NAME=TaskManagementSystem
+DB_USER=sa
+DB_PASSWORD=PLACEHOLDER_DB_PASSWORD
+
+JWT_KEY=PLACEHOLDER_JWT_KEY
+JWT_ISSUER=TMSAPI
+JWT_AUDIENCE=TMSWebClient
+
+ADMIN_EMAIL=admin@tms.com
+ADMIN_PASSWORD=PLACEHOLDER_ADMIN_PASSWORD
+ADMIN_DISPLAYNAME=Admin
+
+ASPNETCORE_ENVIRONMENT=Production
+ASPNETCORE_URLS=http://+:5000
+ENV_EOF
+                    
+                    # Replace placeholders with actual credentials
+                    sed -i "s|PLACEHOLDER_DB_PASSWORD|${DB_PASSWORD}|g" .env
+                    sed -i "s|PLACEHOLDER_JWT_KEY|${JWT_KEY}|g" .env
+                    sed -i "s|PLACEHOLDER_ADMIN_PASSWORD|${ADMIN_PASSWORD}|g" .env
+                    
+                    echo "✅ .env file created"
+                '''
+            }
+        }
+
         stage('Deploy Locally') {
             steps {
                 sh """
@@ -47,6 +80,22 @@ pipeline {
                     
                     # Navigate to workspace
                     cd ${WORKSPACE}
+                    
+                    # Check if Docker Compose is available
+                    echo "=== Checking Docker installation ==="
+                    if ! command -v docker &> /dev/null; then
+                        echo "❌ Docker is not installed!"
+                        exit 1
+                    fi
+                    
+                    if ! command -v docker-compose &> /dev/null; then
+                        echo "❌ Docker Compose is not installed at /usr/local/bin/docker-compose!"
+                        echo "✅ But we found it at: \$(which docker-compose || echo 'not found')"
+                        exit 1
+                    fi
+                    
+                    echo "✅ Docker: \$(docker --version)"
+                    echo "✅ Docker Compose: \$(docker-compose --version)"
                     
                     # Stop old services
                     echo "=== STEP 1: Stop old TMS application services ==="
@@ -58,64 +107,42 @@ pipeline {
                     sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
                     sudo systemctl restart nginx 2>/dev/null || true
                     
-                    echo "=== STEP 3: Create secure .env file ==="
+                    echo "=== STEP 3: Prepare deployment directory ==="
                     sudo mkdir -p ${DEPLOY_PATH}
-                    cat > .env << "EOF"
-DB_SERVER=sql-server
-DB_NAME=TaskManagementSystem
-DB_USER=sa
-DB_PASSWORD=${DB_PASSWORD}
-
-JWT_KEY=${JWT_KEY}
-JWT_ISSUER=TMSAPI
-JWT_AUDIENCE=TMSWebClient
-
-ADMIN_EMAIL=admin@tms.com
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-ADMIN_DISPLAYNAME=Admin
-
-ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://+:5000
-EOF
                     sudo cp .env ${DEPLOY_PATH}/
                     sudo chmod 600 ${DEPLOY_PATH}/.env
-                    echo "✅ .env file created with secure permissions"
                     
-                    echo "=== STEP 4: Copy project to deployment directory ==="
-                    sudo cp -r . ${DEPLOY_PATH}/
-                    sudo chown -R ${USER}:${USER} ${DEPLOY_PATH}/
+                    # Copy project files
+                    echo "Copying project files..."
+                    find . -maxdepth 1 -type f -name "*.yml" -o -name "Dockerfile*" -o -name "*.sln" | xargs -I {} sudo cp {} ${DEPLOY_PATH}/ 2>/dev/null || true
+                    sudo cp -r TMS.API TMS.Web TMS.Shared ${DEPLOY_PATH}/
                     
-                    echo "=== STEP 5: Build and start Docker containers ==="
+                    sudo chown -R jenkins:jenkins ${DEPLOY_PATH}/
+                    echo "✅ Files copied to deployment directory"
+                    
+                    echo "=== STEP 4: Build and start Docker containers ==="
                     cd ${DEPLOY_PATH}
                     
-                    # Check if Docker Compose is installed
-                    if ! command -v docker-compose &> /dev/null; then
-                        echo "❌ Docker Compose not found!"
-                        echo "Installing Docker and Docker Compose..."
-                        sudo apt-get update
-                        sudo apt-get install -y docker.io docker-compose
-                        sudo usermod -aG docker ${USER}
-                        echo "Log out and back in for group changes to take effect"
-                        echo "Please restart Jenkins after installation"
-                        exit 1
-                    fi
-                    
                     # Stop any existing containers
+                    echo "Stopping any existing containers..."
                     sudo docker-compose down --remove-orphans 2>/dev/null || true
                     
-                    # Build and start
+                    # Build images
                     echo "Building Docker images..."
                     sudo docker-compose build --no-cache
                     
+                    # Start containers
                     echo "Starting containers..."
                     sudo docker-compose up -d
                     
-                    echo "=== STEP 6: Wait for services to be ready ==="
+                    echo "=== STEP 5: Wait for services to be ready ==="
                     # Wait for SQL Server
                     echo "Waiting for SQL Server to start..."
+                    sleep 10
+                    
                     for i in {1..30}; do
                         if sudo docker-compose exec -T sql-server /opt/mssql-tools/bin/sqlcmd \\
-                            -S localhost -U sa -P "${DB_PASSWORD}" \\
+                            -S localhost -U sa -P "\${DB_PASSWORD}" \\
                             -Q "SELECT 1" > /dev/null 2>&1; then
                             echo "✅ SQL Server is ready (attempt \$i)"
                             break
@@ -151,14 +178,14 @@ EOF
                         sleep 2
                     done
                     
-                    echo "=== STEP 7: Verify all containers are running ==="
+                    echo "=== STEP 6: Verify all containers are running ==="
                     sudo docker-compose ps
                     
-                    echo "=== STEP 8: Get server IP ==="
+                    echo "=== STEP 7: Get server IP ==="
                     SERVER_IP=\$(hostname -I | awk '{print \$1}')
                     echo "Server IP: \${SERVER_IP}"
                     
-                    echo "=== STEP 9: Final verification ==="
+                    echo "=== STEP 8: Final verification ==="
                     API_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/swagger || echo "000")
                     WEB_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:7130 || echo "000")
                     
