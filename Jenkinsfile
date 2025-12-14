@@ -166,6 +166,9 @@ ${DC_CMD} build --no-cache
 
 # --- Start SQL Server first ---
 echo "=== STEP 5: Start SQL Server container ==="
+# First, ensure the data directory has proper permissions
+sudo chown -R 10001:0 "${DEPLOY_PATH}/sqlserver-data"
+sudo chmod -R 777 "${DEPLOY_PATH}/sqlserver-data"
 ${DC_CMD} up -d sql-server || true
 
 # --- Wait for SQL Server to be ready ---
