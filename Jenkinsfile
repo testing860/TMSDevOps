@@ -125,8 +125,8 @@ echo "🔧 Ensuring SQL Server data directory exists and is writable..."
 if [ ! -d "${DEPLOY_PATH}/sqlserver-data" ]; then
     sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
 fi
-sudo chown -R 10001:10001 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
-sudo chmod -R 770 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
+sudo chown -R 10001:0 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
+sudo chmod -R 777 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
 echo "✅ sqlserver-data ready"
 
 # --- Sanitize nginx config ---
@@ -166,9 +166,6 @@ ${DC_CMD} build --no-cache
 
 # --- Start SQL Server first ---
 echo "=== STEP 5: Start SQL Server container ==="
-# First, ensure the data directory has proper permissions
-sudo chown -R 10001:0 "${DEPLOY_PATH}/sqlserver-data"
-sudo chmod -R 777 "${DEPLOY_PATH}/sqlserver-data"
 ${DC_CMD} up -d sql-server || true
 
 # --- Wait for SQL Server to be ready ---
@@ -196,7 +193,8 @@ echo "✅ SQL Server ready"
 
 # --- Start API and Web ---
 echo "Starting API and Web containers..."
-${DC_CMD} up -d tms-api tms-web || true
+# FIX: Use correct service names from docker-compose.yml - 'api' and 'web' not 'tms-api' and 'tms-web'
+${DC_CMD} up -d api web || true
 
 # --- Initialize DB if missing ---
 echo "=== STEP 6: Ensure TaskManagementSystem DB exists ==="
@@ -240,6 +238,7 @@ else
     echo "⚠️ Warning: one or more services didn't report healthy"
     echo "Check logs:"
     echo "  docker logs tms-sqlserver --tail=80"
+    # FIX: Use correct container names - 'tms-api' and 'tms-web' (container names, not service names)
     echo "  docker logs tms-api --tail=80"
     echo "  docker logs tms-web --tail=80"
 fi
