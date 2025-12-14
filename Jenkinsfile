@@ -73,10 +73,10 @@ EOF
             }
         }
 
-stage('Deploy Locally') {
-    steps {
-        script {
-            sh '''#!/bin/bash
+        stage('Deploy Locally') {
+            steps {
+                script {
+                    sh '''#!/bin/bash
 set -euo pipefail
 
 echo "🚀 Starting local Docker deployment"
@@ -241,11 +241,9 @@ else
     echo "  docker logs tms-web --tail=80"
 fi
 '''
+                }
+            }
         }
-    }
-
-
-
     }
 
     post {
