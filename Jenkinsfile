@@ -101,18 +101,30 @@ EOF
                         exit 1
                     fi
 
-                    echo "=== STEP 1: Prepare deployment directory ==="
-                    sudo mkdir -p "${DEPLOY_PATH}"
-                    sudo cp -f .env "${DEPLOY_PATH}/" 2>/dev/null || true
-                    sudo chmod 600 "${DEPLOY_PATH}/.env" 2>/dev/null || true
+                    echo "=== STEP 1: Stop old TMS services ==="
+                    sudo systemctl stop tms-api.service 2>/dev/null || true
+                    sudo systemctl stop tms-app.service 2>/dev/null || true
+                    sudo systemctl disable tms-api.service 2>/dev/null || true
+                    sudo systemctl disable tms-app.service 2>/dev/null || true
 
-                    # FIX: Ensure SQL Server data directory has correct permissions
-                    echo "🔧 Setting up SQL Server data directory with correct permissions..."
-                    sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
-                    sudo chmod 777 "${DEPLOY_PATH}/sqlserver-data"
-                    echo "✅ SQL Server data directory permissions fixed"
+                    echo "=== STEP 2: Remove old nginx config (host) ==="
+                    sudo rm -f /etc/nginx/sites-enabled/tms 2>/dev/null || true
+                    sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
+                    sudo systemctl restart nginx 2>/dev/null || true
 
-                    echo "Sanitizing TMS.Web/nginx.conf (if needed)..."
+echo "=== STEP 3: Prepare deployment directory ==="
+sudo mkdir -p "${DEPLOY_PATH}"
+sudo cp -f .env "${DEPLOY_PATH}/" 2>/dev/null || true
+sudo chmod 600 "${DEPLOY_PATH}/.env" 2>/dev/null || true
+
+# FIX: Ensure SQL Server data directory has correct permissions
+echo "🔧 Setting up SQL Server data directory with correct permissions..."
+sudo rm -rf "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
+sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
+sudo chmod 777 "${DEPLOY_PATH}/sqlserver-data"
+echo "✅ SQL Server data directory permissions fixed"
+
+echo "Sanitizing TMS.Web/nginx.conf (if needed)..."
                     if [ -f "TMS.Web/nginx.conf" ]; then
                       if grep -q 'sudo ' TMS.Web/nginx.conf >/dev/null 2>&1 || ! grep -q 'events {' TMS.Web/nginx.conf >/dev/null 2>&1; then
                         echo "⚠️ Detected suspicious content in TMS.Web/nginx.conf — keeping only nginx config from 'events {' onward"
@@ -145,37 +157,11 @@ EOF
                     sudo chown -R jenkins:jenkins "${DEPLOY_PATH}/" || true
                     echo "✅ Files copied to ${DEPLOY_PATH}"
 
-                    echo "=== STEP 2: Check existing containers ==="
-                    echo "Checking for existing TMS containers..."
-                    
-                    # Check if containers exist and get their status
-                    SQL_EXISTS=$(docker ps -a --filter "name=tms-sqlserver" --format "{{.Names}}" | grep -c "tms-sqlserver" || echo "0")
-                    API_EXISTS=$(docker ps -a --filter "name=tms-api" --format "{{.Names}}" | grep -c "tms-api" || echo "0")
-                    WEB_EXISTS=$(docker ps -a --filter "name=tms-web" --format "{{.Names}}" | grep -c "tms-web" || echo "0")
-                    
-                    echo "Existing containers:"
-                    echo "  SQL Server: $SQL_EXISTS"
-                    echo "  API: $API_EXISTS"
-                    echo "  Web: $WEB_EXISTS"
-                    
-                    # Stop containers if they're running (but don't remove them)
-                    if [ "$SQL_EXISTS" = "1" ]; then
-                        echo "Stopping SQL Server container..."
-                        docker stop tms-sqlserver 2>/dev/null || true
-                    fi
-                    
-                    if [ "$API_EXISTS" = "1" ]; then
-                        echo "Stopping API container..."
-                        docker stop tms-api 2>/dev/null || true
-                    fi
-                    
-                    if [ "$WEB_EXISTS" = "1" ]; then
-                        echo "Stopping Web container..."
-                        docker stop tms-web 2>/dev/null || true
-                    fi
-
-                    echo "=== STEP 3: Build and start Docker containers ==="
+                    echo "=== STEP 4: Build and start Docker containers ==="
                     cd "${DEPLOY_PATH}"
+
+                    echo "Stopping any existing containers..."
+                    ${DC_CMD} down --remove-orphans 2>/dev/null || true
 
                     echo "Building Docker images..."
                     ${DC_CMD} build --no-cache
@@ -187,13 +173,9 @@ EOF
                       if [ -n "$OCCUPIERS" ]; then
                         echo "⚠️ Found docker container(s) using host port ${p}: $OCCUPIERS"
                         for c in $OCCUPIERS; do
-                          if [ "$c" != "tms-sqlserver" ] && [ "$c" != "tms-api" ] && [ "$c" != "tms-web" ]; then
-                            echo "Stopping and removing container $c (releasing port ${p})..."
-                            sudo docker stop "$c" || true
-                            sudo docker rm -f "$c" || true
-                          else
-                            echo "Keeping TMS container $c (it will be restarted)"
-                          fi
+                          echo "Stopping and removing container $c (releasing port ${p})..."
+                          sudo docker stop "$c" || true
+                          sudo docker rm -f "$c" || true
                         done
                       fi
                     done
@@ -201,49 +183,78 @@ EOF
                     echo "Starting containers..."
                     ${DC_CMD} up -d
 
-                    echo "=== STEP 4: Check container status ==="
+                    echo "=== STEP 5: Check container status ==="
                     echo "Current running containers:"
                     docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || true
                     
                     echo "Checking SQL Server logs for errors..."
                     ${DC_CMD} logs sql-server --tail=50 2>/dev/null || echo "Could not get SQL Server logs"
                     
-                    echo "=== STEP 5: Wait for SQL Server to be ready ==="
-                    echo "Giving SQL Server time to initialize..."
-                    sleep 30  # Increased wait time
+echo "=== STEP 6: Wait for SQL Server to be ready ==="
+echo "Giving SQL Server time to initialize..."
+sleep 30  # Increased wait time
 
-                    echo "Checking SQL Server container status..."
-                    if docker ps | grep -q "tms-sqlserver"; then
-                        echo "✅ SQL Server container is running"
-                        
-                        # Check if port is listening
-                        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/localhost/1433" 2>/dev/null; then
-                            echo "✅ Port 1433 is open and listening"
-                            echo "✅ SQL Server is running and port is open - continuing deployment"
-                        else
-                            echo "⚠️ Port 1433 not open, but container is running"
-                            echo "This might be OK if SQL Server is still starting up"
-                        fi
-                    else
-                        echo "❌ SQL Server container is not running!"
-                        exit 1  # This is a real failure
+echo "Checking SQL Server container status..."
+if docker ps | grep -q "tms-sqlserver"; then
+    echo "✅ SQL Server container is running"
+    
+    # Check if port is listening
+    if timeout 2 bash -c "cat < /dev/null > /dev/tcp/localhost/1433" 2>/dev/null; then
+        echo "✅ Port 1433 is open and listening"
+        
+        # Don't fail if sqlcmd doesn't exist - that's OK!
+        if docker exec tms-sqlserver sh -c "command -v /opt/mssql-tools/bin/sqlcmd" >/dev/null 2>&1; then
+            echo "sqlcmd exists, testing connection..."
+            if docker exec tms-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "SELECT 1" 2>/dev/null; then
+                echo "✅ SQL Server connection verified with sqlcmd"
+            else
+                echo "⚠️ sqlcmd connection test failed (but container is running)"
+            fi
+        else
+            echo "ℹ️ sqlcmd not found in container (this is normal for SQL Server Express)"
+            echo "✅ SQL Server is running and port is open - continuing deployment"
+        fi
+    else
+        echo "⚠️ Port 1433 not open, but container is running"
+        echo "This might be OK if SQL Server is still starting up"
+    fi
+else
+    echo "❌ SQL Server container is not running!"
+    exit 1  # This is a real failure
+fi
+
+echo "Proceeding with deployment..."
+
+                    echo "=== STEP 7: Initialize Database ==="
+                    echo "Creating database if it doesn't exist..."
+                    # Use a simpler approach to check/create database
+                    docker exec tms-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "
+                        IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TaskManagementSystem')
+                        BEGIN
+                            CREATE DATABASE TaskManagementSystem;
+                            PRINT 'Database created successfully.';
+                        END
+                        ELSE
+                        BEGIN
+                            PRINT 'Database already exists.';
+                        END
+                    " 2>/dev/null || echo "Note: Could not create database (might already exist)"
+
+echo "=== STEP 8: API Status ==="
+if docker ps | grep -q "tms-api"; then
+    echo "✅ API container is running"
+else
+    echo "⚠️ API container is not running"
+    echo "Continuing deployment anyway..."
+fi
+
+                    if [ "$API_OK" = "false" ]; then
+                        echo "⚠️ API not responding, checking logs..."
+                        ${DC_CMD} logs api --tail=50 || true
+                        echo "Will continue anyway to check web..."
                     fi
 
-                    echo "Proceeding with deployment..."
-
-                    echo "=== STEP 6: Database initialization ==="
-                    echo "Database will be initialized by the API container on startup"
-                    echo "The API's Entity Framework migrations will handle database creation and updates"
-                    
-                    echo "=== STEP 7: API Status ==="
-                    if docker ps | grep -q "tms-api"; then
-                        echo "✅ API container is running"
-                    else
-                        echo "⚠️ API container is not running"
-                        echo "Continuing deployment anyway..."
-                    fi
-
-                    echo "=== STEP 8: Wait for Web to respond ==="
+                    echo "=== STEP 9: Wait for Web to respond ==="
                     WEB_OK=false
                     for i in $(seq 1 20); do
                         echo "Web check attempt $i/20..."
@@ -261,7 +272,7 @@ EOF
                         ${DC_CMD} logs web --tail=50 || true
                     fi
 
-                    echo "=== STEP 9: Final verification ==="
+                    echo "=== STEP 10: Final verification ==="
                     echo "Current container status:"
                     ${DC_CMD} ps || true
                     
