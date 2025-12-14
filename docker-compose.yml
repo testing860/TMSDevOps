@@ -37,8 +37,20 @@ services:
       - ASPNETCORE_URLS=http://+:5000
     depends_on:
       - sql-server
+    command: >
+      /bin/bash -c "
+        echo 'Waiting for SQL Server...'
+        until /opt/mssql-tools/bin/sqlcmd -S sql-server -U sa -P \$DB_PASSWORD -Q 'SELECT 1' >/dev/null 2>&1; do
+          sleep 3
+        done
+        echo 'SQL Server ready, applying EF Core migrations...'
+        dotnet ef database update --no-build --verbose
+        echo 'Starting API...'
+        dotnet TMS.API.dll
+      "
     networks:
       - tms-network
+
 
   web:
     build:
