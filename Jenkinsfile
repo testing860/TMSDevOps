@@ -119,8 +119,10 @@ sudo chmod 600 "${DEPLOY_PATH}/.env" 2>/dev/null || true
 
 # FIX: Ensure SQL Server data directory has correct permissions
 echo "🔧 Setting up SQL Server data directory with correct permissions..."
-sudo rm -rf "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
-sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
+if [ ! -d "${DEPLOY_PATH}/sqlserver-data" ]; then
+    echo "Creating new SQL Server data directory..."
+    sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
+fi
 sudo chmod 777 "${DEPLOY_PATH}/sqlserver-data"
 echo "✅ SQL Server data directory permissions fixed"
 
