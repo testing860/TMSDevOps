@@ -1,4 +1,4 @@
-"pipeline {
+pipeline {
     agent any
 
     environment {
@@ -259,4 +259,4 @@ fi
             echo '✅ Pipeline succeeded! Docker deployment complete.'
         }
     }
-}" so like this? just say Yes (if 100% right) or no if not.
+}
