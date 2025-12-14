@@ -3,7 +3,7 @@ services:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: tms-sqlserver
     env_file:
-       - .env
+      - .env
     environment:
       - ACCEPT_EULA=Y
       - SA_PASSWORD=${DB_PASSWORD}
@@ -16,39 +16,38 @@ services:
     networks:
       - tms-network
 
-api:
-  build:
-    context: .
-    dockerfile: Dockerfile
-  container_name: tms-api
-  ports:
-    - "5000:5000"
-  environment:
-    - DB_SERVER=sql-server
-    - DB_NAME=${DB_NAME:-TaskManagementSystem}
-    - DB_USER=sa
-    - DB_PASSWORD=${DB_PASSWORD}
-    - JWT_KEY=${JWT_KEY}
-    - JWT_ISSUER=${JWT_ISSUER:-TMSAPI}
-    - JWT_AUDIENCE=${JWT_AUDIENCE:-TMSWebClient}
-    - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tms.com}
-    - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Test123!}
-    - ASPNETCORE_ENVIRONMENT=Production
-    - ASPNETCORE_URLS=http://+:5000
-  depends_on:
-    - sql-server
-  command: >
-    /bin/bash -c "
-      until /opt/mssql-tools/bin/sqlcmd -S sql-server -U sa -P \"$DB_PASSWORD\" -Q 'SELECT 1' >/dev/null 2>&1;
-      do
-        sleep 3;
-      done;
-      dotnet ef database update --no-build --verbose;
-      dotnet TMS.API.dll
-    "
-  networks:
-    - tms-network
-
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tms-api
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_SERVER=sql-server
+      - DB_NAME=${DB_NAME:-TaskManagementSystem}
+      - DB_USER=sa
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_KEY=${JWT_KEY}
+      - JWT_ISSUER=${JWT_ISSUER:-TMSAPI}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-TMSWebClient}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@tms.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Test123!}
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+    depends_on:
+      - sql-server
+    command: >
+      /bin/bash -c "
+        until /opt/mssql-tools/bin/sqlcmd -S sql-server -U sa -P \"$DB_PASSWORD\" -Q 'SELECT 1' >/dev/null 2>&1;
+        do
+          sleep 3;
+        done;
+        dotnet ef database update --no-build --verbose;
+        dotnet TMS.API.dll
+      "
+    networks:
+      - tms-network
 
   web:
     build:
@@ -69,4 +68,5 @@ networks:
     driver: bridge
 
 volumes:
-  tms-sql-data:
+  sqlserver-data:
+
