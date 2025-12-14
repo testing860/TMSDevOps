@@ -112,12 +112,19 @@ EOF
                     sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
                     sudo systemctl restart nginx 2>/dev/null || true
 
-                    echo "=== STEP 3: Prepare deployment directory ==="
-                    sudo mkdir -p "${DEPLOY_PATH}"
-                    sudo cp -f .env "${DEPLOY_PATH}/" 2>/dev/null || true
-                    sudo chmod 600 "${DEPLOY_PATH}/.env" 2>/dev/null || true
+echo "=== STEP 3: Prepare deployment directory ==="
+sudo mkdir -p "${DEPLOY_PATH}"
+sudo cp -f .env "${DEPLOY_PATH}/" 2>/dev/null || true
+sudo chmod 600 "${DEPLOY_PATH}/.env" 2>/dev/null || true
 
-                    echo "Sanitizing TMS.Web/nginx.conf (if needed)..."
+# FIX: Ensure SQL Server data directory has correct permissions
+echo "🔧 Setting up SQL Server data directory with correct permissions..."
+sudo rm -rf "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
+sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
+sudo chmod 777 "${DEPLOY_PATH}/sqlserver-data"
+echo "✅ SQL Server data directory permissions fixed"
+
+echo "Sanitizing TMS.Web/nginx.conf (if needed)..."
                     if [ -f "TMS.Web/nginx.conf" ]; then
                       if grep -q 'sudo ' TMS.Web/nginx.conf >/dev/null 2>&1 || ! grep -q 'events {' TMS.Web/nginx.conf >/dev/null 2>&1; then
                         echo "⚠️ Detected suspicious content in TMS.Web/nginx.conf — keeping only nginx config from 'events {' onward"
