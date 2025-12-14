@@ -303,16 +303,9 @@ NGINXEOF
                     echo "Checking if rebuild is needed..."
                     REBUILD_NEEDED=false
                     
-                    # Check Dockerfile changes
-                    if [ -f "docker-compose.yml" ] && [ -f "../docker-compose.yml" ]; then
-                        if ! cmp -s "docker-compose.yml" "../docker-compose.yml"; then
-                            REBUILD_NEEDED=true
-                            echo "ℹ️ docker-compose.yml changed - rebuild needed"
-                        fi
-                    fi
-                    
-                    # Check for rebuild flag
-                    if [ "${params.FORCE_REBUILD}" = "true" ]; then
+                    # Check if FORCE_REBUILD parameter is true
+                    # FIX: Use Jenkins environment variable instead of params in shell script
+                    if [ "$FORCE_REBUILD" = "true" ]; then
                         REBUILD_NEEDED=true
                         echo "ℹ️ Force rebuild requested"
                     fi
@@ -325,12 +318,10 @@ NGINXEOF
                             docker compose build --no-cache
                         fi
                     else
-                        echo "Pulling latest images..."
+                        echo "Building Docker images (always building to ensure fresh images)..."
                         if [ "${DC_CMD}" = "docker-compose" ]; then
-                            docker-compose pull 2>/dev/null || echo "ℹ️ Could not pull images, building instead"
                             docker-compose build --no-cache
                         else
-                            docker compose pull 2>/dev/null || echo "ℹ️ Could not pull images, building instead"
                             docker compose build --no-cache
                         fi
                     fi
