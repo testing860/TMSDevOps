@@ -75,8 +75,7 @@ EOF
 
   stage('Deploy Locally') {
     steps {
-        sh '''
-#!/bin/bash
+        sh """bash -c '
 set -euo pipefail
 
 echo "🚀 Starting local Docker deployment"
@@ -85,7 +84,7 @@ echo "Deploy path: ${DEPLOY_PATH}"
 
 cd "${WORKSPACE}"
 
-# --- docker / compose detection ---
+# --- Docker / Compose detection ---
 if ! command -v docker >/dev/null 2>&1; then
     echo "❌ Docker is not installed"
     exit 1
@@ -102,7 +101,7 @@ else
     exit 1
 fi
 
-# --- stop/cleanup old host services (safe) ---
+# --- Stop/cleanup old host services ---
 echo "=== STEP 1: Stop old TMS services (if any) ==="
 sudo systemctl stop tms-api.service 2>/dev/null || true
 sudo systemctl stop tms-app.service 2>/dev/null || true
@@ -114,14 +113,13 @@ sudo rm -f /etc/nginx/sites-enabled/tms 2>/dev/null || true
 sudo rm -f /etc/nginx/sites-available/tms 2>/dev/null || true
 sudo systemctl restart nginx 2>/dev/null || true
 
-# --- prepare deployment directory and .env ---
+# --- Prepare deployment directory and .env ---
 echo "=== STEP 3: Prepare deployment directory ==="
 sudo mkdir -p "${DEPLOY_PATH}"
 sudo cp -f .env "${DEPLOY_PATH}/" 2>/dev/null || true
 sudo chmod 644 "${DEPLOY_PATH}/.env" 2>/dev/null || true
 echo "✅ .env copied to ${DEPLOY_PATH} (chmod 644)"
 
-# ensure sqlserver-data dir exists and is writable
 echo "🔧 Ensuring SQL Server data directory exists and is writable..."
 if [ ! -d "${DEPLOY_PATH}/sqlserver-data" ]; then
     sudo mkdir -p "${DEPLOY_PATH}/sqlserver-data"
@@ -130,16 +128,16 @@ sudo chown -R 10001:10001 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
 sudo chmod -R 770 "${DEPLOY_PATH}/sqlserver-data" 2>/dev/null || true
 echo "✅ sqlserver-data ready"
 
-# --- sanitize nginx config if necessary ---
+# --- Sanitize nginx config ---
 echo "Sanitizing TMS.Web/nginx.conf (if needed)..."
 if [ -f "TMS.Web/nginx.conf" ]; then
-    if grep -q 'sudo ' TMS.Web/nginx.conf >/dev/null 2>&1 || ! grep -q 'events {' TMS.Web/nginx.conf >/dev/null 2>&1; then
-        awk '/events \\{/{p=1} p{print}' TMS.Web/nginx.conf > TMS.Web/nginx.conf.sanitized || true
+    if grep -q "sudo " TMS.Web/nginx.conf >/dev/null 2>&1 || ! grep -q "events {" TMS.Web/nginx.conf >/dev/null 2>&1; then
+        awk "/events \\{/{p=1} p{print}" TMS.Web/nginx.conf > TMS.Web/nginx.conf.sanitized || true
         if [ -s TMS.Web/nginx.conf.sanitized ]; then
             mv TMS.Web/nginx.conf.sanitized TMS.Web/nginx.conf
             echo "✅ nginx.conf sanitized"
         else
-            echo "❌ nginx.conf sanitization failed - leaving original in place"
+            echo "❌ nginx.conf sanitization failed - leaving original"
         fi
     else
         echo "✅ nginx.conf looks OK"
@@ -148,12 +146,11 @@ else
     echo "⚠️ TMS.Web/nginx.conf not found"
 fi
 
-# --- copy project files to deploy path ---
+# --- Copy project files to deploy path ---
 echo "Copying project files to ${DEPLOY_PATH}..."
 sudo cp -f docker-compose.yml Dockerfile "${DEPLOY_PATH}/" 2>/dev/null || true
 sudo cp -f TMS.Web/Dockerfile "${DEPLOY_PATH}/TMS.Web/" 2>/dev/null || true
 sudo cp -f TMS.Web/nginx.conf "${DEPLOY_PATH}/TMS.Web/" 2>/dev/null || true
-
 sudo rm -rf "${DEPLOY_PATH}/TMS.API" "${DEPLOY_PATH}/TMS.Web" "${DEPLOY_PATH}/TMS.Shared" 2>/dev/null || true
 sudo cp -r TMS.API TMS.Web TMS.Shared "${DEPLOY_PATH}/" 2>/dev/null || true
 sudo chown -R jenkins:jenkins "${DEPLOY_PATH}/" 2>/dev/null || true
@@ -161,15 +158,16 @@ echo "✅ Files copied to ${DEPLOY_PATH}"
 
 cd "${DEPLOY_PATH}"
 
-# --- build images ---
+# --- Build Docker images ---
 echo "=== STEP 4: Build Docker images ==="
 ${DC_CMD} down --remove-orphans 2>/dev/null || true
 ${DC_CMD} build --no-cache
 
-# --- start SQL server first ---
-echo "=== STEP 5: Start SQL Server container first ==="
+# --- Start SQL Server first ---
+echo "=== STEP 5: Start SQL Server container ==="
 ${DC_CMD} up -d sql-server || true
 
+# --- Wait for SQL Server to be ready ---
 sql_is_ready() {
     if docker exec tms-sqlserver sh -c "command -v /opt/mssql-tools/bin/sqlcmd" >/dev/null 2>&1; then
         docker exec tms-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "SELECT 1" >/dev/null 2>&1 && return 0 || return 1
@@ -183,7 +181,7 @@ counter=0
 until sql_is_ready; do
     counter=$((counter+1))
     if [ ${counter} -ge 36 ]; then
-        echo "❌ SQL Server did not become ready within timeout. Logs (tail 100):"
+        echo "❌ SQL Server did not become ready within timeout. Logs:"
         docker logs tms-sqlserver --tail=100 || true
         exit 1
     fi
@@ -192,20 +190,20 @@ until sql_is_ready; do
 done
 echo "✅ SQL Server ready"
 
-# --- start api and web ---
+# --- Start API and Web ---
 echo "Starting API and Web containers..."
 ${DC_CMD} up -d tms-api tms-web || true
 
-# --- optional: initialize DB ---
+# --- Initialize DB if missing ---
 echo "=== STEP 6: Ensure TaskManagementSystem DB exists ==="
 if docker exec tms-sqlserver sh -c "command -v /opt/mssql-tools/bin/sqlcmd" >/dev/null 2>&1; then
     docker exec tms-sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TaskManagementSystem') CREATE DATABASE TaskManagementSystem;" || true
 else
     docker run --rm --network container:tms-sqlserver mcr.microsoft.com/mssql-tools /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD}" -Q "IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'TaskManagementSystem') CREATE DATABASE TaskManagementSystem;" || true
 fi
-echo "✅ DB initialization step done"
+echo "✅ DB initialization done"
 
-# --- health checks ---
+# --- Health checks ---
 echo "=== STEP 7: Health checks (API + Web) ==="
 API_OK=false
 for i in $(seq 1 30); do
@@ -228,6 +226,7 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
+# --- Final status ---
 echo "=== FINAL STATUS ==="
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
@@ -240,9 +239,10 @@ else
     echo "  docker logs tms-api --tail=80"
     echo "  docker logs tms-web --tail=80"
 fi
-'''
+'"""
     }
 }
+
 
 
     }
