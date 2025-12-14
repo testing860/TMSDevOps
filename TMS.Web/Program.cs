@@ -26,7 +26,7 @@ if (string.IsNullOrWhiteSpace(apiBaseUrl))
     // Fallback for development
     apiBaseUrl = builder.HostEnvironment.IsDevelopment()
         ? "https://localhost:7130/"
-        : "http://localhost:5000/";
+        : "/";
 }
 
 Console.WriteLine($"API Base URL: {apiBaseUrl}");
@@ -60,3 +60,4 @@ builder.Services.AddScoped<ApiClient>();
 builder.Services.AddScoped<AuthService>();
 
 await builder.Build().RunAsync();
+
