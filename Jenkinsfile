@@ -1,4 +1,4 @@
-pipeline {
+"pipeline {
     agent any
 
     environment {
@@ -73,9 +73,10 @@ EOF
             }
         }
 
-  stage('Deploy Locally') {
+stage('Deploy Locally') {
     steps {
-        sh """bash -c '
+        script {
+            sh '''#!/bin/bash
 set -euo pipefail
 
 echo "🚀 Starting local Docker deployment"
@@ -239,9 +240,9 @@ else
     echo "  docker logs tms-api --tail=80"
     echo "  docker logs tms-web --tail=80"
 fi
-'"""
+'''
+        }
     }
-}
 
 
 
@@ -258,4 +259,4 @@ fi
             echo '✅ Pipeline succeeded! Docker deployment complete.'
         }
     }
-}
+}" so like this? just say Yes (if 100% right) or no if not.
