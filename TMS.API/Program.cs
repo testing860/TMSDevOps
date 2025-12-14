@@ -126,7 +126,13 @@ builder.Services.AddCors(options =>
                 "http://localhost:7130",      // Local dev
                 "http://127.0.0.1:7130",      // Alternative localhost
                 "http://tms-web:80",          // Docker service
-                "http://web:80"               // Docker compose service
+                "http://web:80",               // Docker compose service
+                "http://10.0.2.15:7130",      // Server IP
+                "http://localhost:5000",
+                "http://api:5000",
+                "http://localhost",
+                "http://10.0.2.15:5000",      // Server IP on API port
+                "http://10.0.2.15"           // Server IP without port
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
